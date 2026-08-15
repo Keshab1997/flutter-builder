@@ -1,0 +1,12 @@
+# Never commit signing files or local secrets
+*.jks
+*.keystore
+key.properties
+.env
+keystore-base64.txt
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

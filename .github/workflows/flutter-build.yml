@@ -1,0 +1,187 @@
+name: Reusable Flutter Build
+
+on:
+  workflow_call:
+    inputs:
+      flutter-channel:
+        description: Flutter channel (stable, beta, or master)
+        required: false
+        type: string
+        default: stable
+      java-version:
+        description: Java version used for Android builds
+        required: false
+        type: string
+        default: "17"
+      working-directory:
+        description: Flutter project directory inside the caller repository
+        required: false
+        type: string
+        default: "."
+      run-format-check:
+        description: Check Dart formatting
+        required: false
+        type: boolean
+        default: true
+      run-analyze:
+        description: Run flutter analyze
+        required: false
+        type: boolean
+        default: true
+      run-tests:
+        description: Run flutter test when the test directory exists
+        required: false
+        type: boolean
+        default: true
+      build-apk:
+        description: Build a release APK
+        required: false
+        type: boolean
+        default: false
+      build-aab:
+        description: Build a signed release AAB
+        required: false
+        type: boolean
+        default: false
+      artifact-retention-days:
+        description: Number of days to keep build artifacts
+        required: false
+        type: number
+        default: 14
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        description: Base64-encoded upload-keystore.jks (required for AAB)
+        required: false
+      KEYSTORE_PASSWORD:
+        description: Android upload keystore password (required for AAB)
+        required: false
+      KEY_ALIAS:
+        description: Android upload key alias (required for AAB)
+        required: false
+      KEY_PASSWORD:
+        description: Android upload key password (required for AAB)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    name: Validate and build Flutter app
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    env:
+      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout caller project
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      - name: Verify Flutter project
+        run: |
+          test -f pubspec.yaml || {
+            echo "pubspec.yaml was not found in: $PWD"
+            echo "Set the working-directory input when the Flutter app is in a subdirectory."
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check Dart formatting
+        if: inputs.run-format-check
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze source code
+        if: inputs.run-analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Run tests
+        if: inputs.run-tests
+        run: |
+          if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
+            flutter test
+          else
+            echo "No *_test.dart files found; test step skipped."
+          fi
+
+      - name: Verify AAB signing secrets
+        if: inputs.build-aab
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD_VALUE: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          missing=0
+          [ -n "$HAS_ANDROID_KEYSTORE" ] || { echo "Missing secret: ANDROID_KEYSTORE_BASE64"; missing=1; }
+          [ -n "$STORE_PASSWORD" ] || { echo "Missing secret: KEYSTORE_PASSWORD"; missing=1; }
+          [ -n "$KEY_ALIAS_VALUE" ] || { echo "Missing secret: KEY_ALIAS"; missing=1; }
+          [ -n "$KEY_PASSWORD_VALUE" ] || { echo "Missing secret: KEY_PASSWORD"; missing=1; }
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Configure Android signing
+        if: inputs.build-aab
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD_VALUE: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          printf '%s' "$HAS_ANDROID_KEYSTORE" | base64 --decode > android/app/upload-keystore.jks
+          {
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD_VALUE"
+            echo "keyAlias=$KEY_ALIAS_VALUE"
+            echo "storeFile=upload-keystore.jks"
+          } > android/key.properties
+          chmod 600 android/app/upload-keystore.jks android/key.properties
+
+      - name: Build release APK
+        if: inputs.build-apk
+        run: flutter build apk --release
+
+      - name: Build signed release AAB
+        if: inputs.build-aab
+        run: flutter build appbundle --release
+
+      - name: Upload APK artifact
+        if: inputs.build-apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: ${{ inputs.working-directory }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: Upload AAB artifact
+        if: inputs.build-aab
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab
+          path: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact-retention-days }}

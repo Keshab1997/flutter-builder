@@ -1,0 +1,23 @@
+name: Manual Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Which Android file should be built?
+        required: true
+        type: choice
+        options:
+          - apk
+          - aab
+        default: apk
+
+jobs:
+  build:
+    uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1
+    with:
+      flutter-channel: stable
+      build-apk: ${{ inputs.format == 'apk' }}
+      build-aab: ${{ inputs.format == 'aab' }}
+      artifact-retention-days: 14
+    secrets: inherit

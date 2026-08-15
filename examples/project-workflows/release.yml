@@ -1,0 +1,16 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-aab:
+    uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1
+    with:
+      flutter-channel: stable
+      build-apk: false
+      build-aab: true
+      artifact-retention-days: 30
+    secrets: inherit
