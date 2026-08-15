@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: "."
+      generate-android-platform:
+        description: Generate the Android platform when the caller project has no android directory
+        required: false
+        type: boolean
+        default: false
       run-format-check:
         description: Check Dart formatting
         required: false
@@ -109,6 +114,15 @@ jobs:
             echo "Set the working-directory input when the Flutter app is in a subdirectory."
             exit 1
           }
+
+      - name: Generate Android platform when missing
+        if: inputs.generate-android-platform
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android .
+          else
+            echo "Android platform already exists; generation skipped."
+          fi
 
       - name: Install dependencies
         run: flutter pub get

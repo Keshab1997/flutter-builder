@@ -118,6 +118,7 @@ jobs:
     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
     with:
       working-directory: apps/mobile
+      generate-android-platform: true # android/ directory না থাকলে
       build-apk: true
 ```
 
