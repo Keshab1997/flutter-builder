@@ -23,6 +23,11 @@ on:
         required: false
         type: boolean
         default: false
+      android-organization:
+        description: Reverse-domain organization used when generating Android files
+        required: false
+        type: string
+        default: com.example
       run-format-check:
         description: Check Dart formatting
         required: false
@@ -86,14 +91,13 @@ jobs:
 
     steps:
       - name: Checkout caller project
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
-          cache: gradle
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -119,7 +123,17 @@ jobs:
         if: inputs.generate-android-platform
         run: |
           if [ ! -d android ]; then
-            flutter create --platforms=android .
+            project_name="$(awk '/^name:/{print $2; exit}' pubspec.yaml)"
+            temp_dir="$(mktemp -d)"
+            flutter create \
+              --platforms=android \
+              --no-pub \
+              --project-name "$project_name" \
+              --org "${{ inputs.android-organization }}" \
+              "$temp_dir/generated"
+            cp -a "$temp_dir/generated/android" ./android
+            rm -rf "$temp_dir"
+            echo "Generated Android platform for $project_name."
           else
             echo "Android platform already exists; generation skipped."
           fi
