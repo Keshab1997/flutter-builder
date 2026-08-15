@@ -55,13 +55,13 @@ App repository-তে directory তৈরি করুন:
 তারপর file-এর এই অংশ:
 
 ```yaml
-uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
 ```
 
 নিজের GitHub username দিয়ে পরিবর্তন করুন:
 
 ```yaml
-uses: আপনার-ইউজারনেম/flutter-builder/.github/workflows/flutter-build.yml@v1
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
 ```
 
 এখন Pull Request বা `main` branch-এ push হলে format, analyze ও test চলবে। সাধারণ code change-এ APK/AAB build হবে না।
@@ -74,7 +74,7 @@ uses: আপনার-ইউজারনেম/flutter-builder/.github/workflows
 .github/workflows/manual-build.yml
 ```
 
-এখানেও `YOUR_USERNAME` পরিবর্তন করুন। এরপর:
+এখানেও `Keshab1997` পরিবর্তন করুন। এরপর:
 
 ```text
 App repository → Actions → Manual Android Build → Run workflow
@@ -115,7 +115,7 @@ Monorepo-তে app যদি `apps/mobile` folder-এ থাকে:
 ```yaml
 jobs:
   build:
-    uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
     with:
       working-directory: apps/mobile
       build-apk: true
@@ -149,7 +149,7 @@ git push origin v1.1.0
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
 ```
 
 সহজ update-এর জন্য `@v1`, সর্বোচ্চ reproducibility/security-এর জন্য exact version বা commit SHA ব্যবহার করুন।

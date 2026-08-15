@@ -8,7 +8,7 @@ on:
 
 jobs:
   ci:
-    uses: YOUR_USERNAME/flutter-builder/.github/workflows/flutter-build.yml@v1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
     with:
       flutter-channel: stable
       run-format-check: true
