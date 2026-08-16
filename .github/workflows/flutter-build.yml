@@ -188,6 +188,79 @@ jobs:
           } > android/key.properties
           chmod 600 android/app/upload-keystore.jks android/key.properties
 
+      - name: Configure generated Android Gradle signing
+        if: inputs.build-aab && inputs.generate-android-platform
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+
+          kotlin_file = Path("android/app/build.gradle.kts")
+          groovy_file = Path("android/app/build.gradle")
+
+          if kotlin_file.exists():
+              text = kotlin_file.read_text()
+              setup = """val keystoreProperties = java.util.Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+          }
+          
+          """
+              signing = """    signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String?
+                      keyPassword = keystoreProperties["keyPassword"] as String?
+                      storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                      storePassword = keystoreProperties["storePassword"] as String?
+                  }
+              }
+          
+          """
+              if "val keystoreProperties = java.util.Properties()" not in text:
+                  text = text.replace("android {", setup + "android {", 1)
+              if 'create("release")' not in text:
+                  text = text.replace("    buildTypes {", signing + "    buildTypes {", 1)
+              text = text.replace(
+                  'signingConfig = signingConfigs.getByName("debug")',
+                  'signingConfig = signingConfigs.getByName("release")',
+              )
+              kotlin_file.write_text(text)
+              if 'signingConfigs.getByName("release")' not in text:
+                  raise SystemExit("Could not configure release signing in build.gradle.kts")
+          elif groovy_file.exists():
+              text = groovy_file.read_text()
+              setup = """def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+          
+          """
+              signing = """    signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          
+          """
+              if "def keystoreProperties = new Properties()" not in text:
+                  text = text.replace("android {", setup + "android {", 1)
+              if "signingConfigs {" not in text:
+                  text = text.replace("    buildTypes {", signing + "    buildTypes {", 1)
+              text = text.replace(
+                  "signingConfig signingConfigs.debug",
+                  "signingConfig signingConfigs.release",
+              )
+              groovy_file.write_text(text)
+              if "signingConfig signingConfigs.release" not in text:
+                  raise SystemExit("Could not configure release signing in build.gradle")
+          else:
+              raise SystemExit("No Android app Gradle file was found")
+          PYTHON
+
       - name: Build release APK
         if: inputs.build-apk
         run: flutter build apk --release
