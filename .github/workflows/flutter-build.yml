@@ -199,10 +199,12 @@ jobs:
 
           if kotlin_file.exists():
               text = kotlin_file.read_text()
-              setup = """val keystoreProperties = java.util.Properties()
+              if "import java.util.Properties" not in text:
+                  text = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + text
+              setup = """val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
           if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
           
           """
