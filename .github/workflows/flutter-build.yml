@@ -270,12 +270,20 @@ jobs:
       - name: Build signed release AAB
         if: inputs.build-aab
         run: |
-          # Flutter 3.44+ has a broken AAB strip/post-process step
-          # ("Release app bundle failed to strip debug symbols from native libraries").
-          # Gradle's bundleRelease still produces a valid .aab before that step
-          # fails, so let flutter run it (it may fail at the strip) and then
-          # ensure the artifact exists by invoking Gradle's bundleRelease
-          # directly, bypassing Flutter's broken wrapper.
+          # TODO(revert): Workaround for the Flutter 3.44+ AAB strip regression
+          # (flutter/flutter#186810 — "Release app bundle failed to strip debug
+          # symbols from native libraries"). Once a STABLE Flutter release fixes
+          # it, revert this step back to a single line:
+          #     flutter build appbundle --release
+          # and delete this comment. Verify by running a Manual Android Test
+          # Build and confirming the AAB artifact is produced without the
+          # "failed to strip debug symbols" error.
+          #
+          # Why the workaround is needed: Flutter 3.44+ has a broken AAB
+          # strip/post-process step. Gradle's bundleRelease still produces a
+          # valid .aab before that step fails, so let flutter run it (it may
+          # fail at the strip) and then ensure the artifact exists by invoking
+          # Gradle's bundleRelease directly, bypassing Flutter's broken wrapper.
           flutter build appbundle --release || true
           test -f build/app/outputs/bundle/release/app-release.aab || (cd android && ./gradlew bundleRelease)
 
