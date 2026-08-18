@@ -269,7 +269,15 @@ jobs:
 
       - name: Build signed release AAB
         if: inputs.build-aab
-        run: flutter build appbundle --release
+        run: |
+          # Flutter 3.44+ has a broken AAB strip/post-process step
+          # ("Release app bundle failed to strip debug symbols from native libraries").
+          # Gradle's bundleRelease still produces a valid .aab before that step
+          # fails, so let flutter run it (it may fail at the strip) and then
+          # ensure the artifact exists by invoking Gradle's bundleRelease
+          # directly, bypassing Flutter's broken wrapper.
+          flutter build appbundle --release || true
+          test -f build/app/outputs/bundle/release/app-release.aab || (cd android && ./gradlew bundleRelease)
 
       - name: Upload APK artifact
         if: inputs.build-apk
