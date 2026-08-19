@@ -12,9 +12,12 @@ on:
           - aab
         default: apk
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
     with:
       flutter-channel: stable
       build-apk: ${{ inputs.format == 'apk' }}

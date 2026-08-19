@@ -1,0 +1,39 @@
+name: Publish Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the GitHub Release as a draft?
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark this as a prerelease?
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+    with:
+      flutter-channel: stable
+      run-format-check: false
+      run-analyze: false
+      run-tests: false
+      build-apk: true
+      build-aab: true
+      artifact-retention-days: 30
+      publish-github-release: true
+      release-name: My Flutter App
+      release-draft: ${{ inputs.draft }}
+      release-prerelease: ${{ inputs.prerelease }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

@@ -148,9 +148,13 @@ android/app/upload-keystore.jks
 *.keystore
 ```
 
-## ৬. AAB build
+## ৬. AAB build অথবা GitHub Release publish
 
-App repository-এর **Actions → Manual Android Build → Run workflow → aab** নির্বাচন করুন। Secrets বা Gradle signing ভুল হলে workflow AAB upload করার আগেই fail করবে।
+শুধু AAB artifact বানাতে app repository-এর **Actions → Manual Android Build → Run workflow → aab** নির্বাচন করুন।
+
+Signed APK, signed AAB, automatic English release notes এবং GitHub Release একসঙ্গে publish করতে **Actions → Publish Android Release → Run workflow** নির্বাচন করুন। Publish workflow-এ `permissions: contents: write` থাকতে হবে।
+
+Secrets বা Gradle signing ভুল হলে workflow AAB/Release publish করার আগেই fail করবে।
 
 ## জরুরি নিরাপত্তা
 

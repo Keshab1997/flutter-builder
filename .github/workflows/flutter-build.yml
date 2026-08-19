@@ -58,22 +58,44 @@ on:
         required: false
         type: number
         default: 14
+      publish-github-release:
+        description: Create a version tag and GitHub Release with English release notes
+        required: false
+        type: boolean
+        default: false
+      release-name:
+        description: Product name used in the GitHub Release title and asset filenames
+        required: false
+        type: string
+        default: ""
+      release-tag:
+        description: Optional Git tag; defaults to v<version-name> from pubspec.yaml
+        required: false
+        type: string
+        default: ""
+      release-draft:
+        description: Create the GitHub Release as a draft
+        required: false
+        type: boolean
+        default: false
+      release-prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: false
+        type: boolean
+        default: false
     secrets:
       ANDROID_KEYSTORE_BASE64:
-        description: Base64-encoded upload-keystore.jks (required for AAB)
+        description: Base64-encoded upload-keystore.jks (required for AAB or GitHub Release publishing)
         required: false
       KEYSTORE_PASSWORD:
-        description: Android upload keystore password (required for AAB)
+        description: Android upload keystore password (required for AAB or GitHub Release publishing)
         required: false
       KEY_ALIAS:
-        description: Android upload key alias (required for AAB)
+        description: Android upload key alias (required for AAB or GitHub Release publishing)
         required: false
       KEY_PASSWORD:
-        description: Android upload key password (required for AAB)
+        description: Android upload key password (required for AAB or GitHub Release publishing)
         required: false
-
-permissions:
-  contents: read
 
 jobs:
   validate-and-build:
@@ -92,6 +114,9 @@ jobs:
     steps:
       - name: Checkout caller project
         uses: actions/checkout@v5
+        with:
+          # Full history is required to compare against the previous release tag.
+          fetch-depth: 0
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -158,8 +183,8 @@ jobs:
             echo "No *_test.dart files found; test step skipped."
           fi
 
-      - name: Verify AAB signing secrets
-        if: inputs.build-aab
+      - name: Verify Android signing secrets
+        if: inputs.build-aab || inputs.publish-github-release
         env:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
@@ -173,7 +198,7 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
 
       - name: Configure Android signing
-        if: inputs.build-aab
+        if: inputs.build-aab || inputs.publish-github-release
         env:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
@@ -189,7 +214,7 @@ jobs:
           chmod 600 android/app/upload-keystore.jks android/key.properties
 
       - name: Configure generated Android Gradle signing
-        if: inputs.build-aab && inputs.generate-android-platform
+        if: (inputs.build-aab || inputs.publish-github-release) && inputs.generate-android-platform
         run: |
           python3 - <<'PYTHON'
           from pathlib import Path
@@ -304,3 +329,278 @@ jobs:
           path: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: Prepare GitHub Release and English release notes
+        if: inputs.publish-github-release
+        id: prepare-release
+        env:
+          RELEASE_NAME_INPUT: ${{ inputs.release-name }}
+          RELEASE_TAG_INPUT: ${{ inputs.release-tag }}
+          BUILD_APK: ${{ inputs.build-apk }}
+          BUILD_AAB: ${{ inputs.build-aab }}
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib
+          import os
+          import re
+          import shutil
+          import subprocess
+          from pathlib import Path
+
+          if os.environ["BUILD_APK"] != "true" and os.environ["BUILD_AAB"] != "true":
+              raise SystemExit("publish-github-release requires build-apk and/or build-aab")
+
+          pubspec = Path("pubspec.yaml").read_text(encoding="utf-8")
+          version_match = re.search(r"^version:\s*['\"]?([^'\"\s]+)", pubspec, re.MULTILINE)
+          name_match = re.search(r"^name:\s*['\"]?([^'\"\s]+)", pubspec, re.MULTILINE)
+          if not version_match:
+              raise SystemExit("No version entry was found in pubspec.yaml")
+
+          full_version = version_match.group(1)
+          version_name, separator, build_number = full_version.partition("+")
+          if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?", version_name):
+              raise SystemExit(f"Unsupported pubspec version name: {version_name}")
+          if separator and not build_number.isdigit():
+              raise SystemExit(f"The pubspec build number must be numeric: {build_number}")
+
+          fallback_name = (name_match.group(1) if name_match else "Flutter App").replace("_", " ").title()
+          product_name = os.environ["RELEASE_NAME_INPUT"].strip() or fallback_name
+          if not product_name or "\n" in product_name or "\r" in product_name:
+              raise SystemExit("release-name must be a non-empty single-line value")
+
+          tag = os.environ["RELEASE_TAG_INPUT"].strip() or f"v{version_name}"
+          if (
+              not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._/-]*", tag)
+              or ".." in tag
+              or tag.endswith(".")
+              or tag.endswith("/")
+          ):
+              raise SystemExit(f"Unsafe or unsupported release tag: {tag}")
+
+          filename_name = re.sub(r"[^0-9A-Za-z._-]+", "-", product_name).strip("-._") or "Flutter-App"
+          asset_dir = Path(os.environ["RUNNER_TEMP"]) / "flutter-release-assets"
+          if asset_dir.exists():
+              shutil.rmtree(asset_dir)
+          asset_dir.mkdir(parents=True)
+
+          assets = []
+          download_rows = []
+          if os.environ["BUILD_APK"] == "true":
+              source = Path("build/app/outputs/flutter-apk/app-release.apk")
+              if not source.is_file():
+                  raise SystemExit(f"Release APK was not found: {source}")
+              target = asset_dir / f"{filename_name}-v{version_name}.apk"
+              shutil.copy2(source, target)
+              assets.append(target)
+              download_rows.append((target.name, "Direct installation and testing on Android devices"))
+
+          if os.environ["BUILD_AAB"] == "true":
+              source = Path("build/app/outputs/bundle/release/app-release.aab")
+              if not source.is_file():
+                  raise SystemExit(f"Release AAB was not found: {source}")
+              target = asset_dir / f"{filename_name}-v{version_name}.aab"
+              shutil.copy2(source, target)
+              assets.append(target)
+              download_rows.append((target.name, "Upload to Google Play Console"))
+
+          checksums = asset_dir / "SHA256SUMS.txt"
+          checksums.write_text(
+              "".join(
+                  f"{hashlib.sha256(asset.read_bytes()).hexdigest()}  {asset.name}\n"
+                  for asset in assets
+              ),
+              encoding="utf-8",
+          )
+
+          def git(*args):
+              result = subprocess.run(
+                  ["git", *args],
+                  check=True,
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+              )
+              return result.stdout.strip()
+
+          previous_tag = ""
+          for candidate in git("tag", "--merged", "HEAD", "--sort=-version:refname").splitlines():
+              if candidate and candidate != tag:
+                  previous_tag = candidate
+                  break
+
+          commit_range = f"{previous_tag}..HEAD" if previous_tag else "HEAD"
+          log_output = git("log", "--no-merges", "--format=%H%x09%s", commit_range)
+          commits = []
+          for line in log_output.splitlines():
+              if "\t" not in line:
+                  continue
+              sha, subject = line.split("\t", 1)
+              subject = subject.strip()
+              if subject:
+                  commits.append((sha, subject))
+
+          categories = {
+              "features": [],
+              "fixes": [],
+              "performance": [],
+              "maintenance": [],
+              "documentation": [],
+              "other": [],
+          }
+          prefix_pattern = re.compile(
+              r"^(feat|feature|fix|bugfix|perf|performance|docs?|chore|build|ci|refactor|test|deps?)(?:\([^)]*\))?!?:\s*",
+              re.IGNORECASE,
+          )
+
+          def classify(subject):
+              lowered = subject.lower()
+              match = prefix_pattern.match(subject)
+              prefix = match.group(1).lower() if match else ""
+              cleaned = prefix_pattern.sub("", subject).strip()
+              cleaned = cleaned[:1].upper() + cleaned[1:] if cleaned else subject
+              if prefix in {"feat", "feature"} or lowered.startswith(("add ", "implement ", "introduce ")):
+                  return "features", cleaned
+              if prefix in {"fix", "bugfix"} or lowered.startswith(("fix ", "resolve ", "correct ", "prevent ")):
+                  return "fixes", cleaned
+              if prefix in {"perf", "performance"} or "performance" in lowered:
+                  return "performance", cleaned
+              if prefix in {"doc", "docs"} or lowered.startswith(("document ", "update readme")):
+                  return "documentation", cleaned
+              if prefix in {"chore", "build", "ci", "refactor", "test", "dep", "deps"} or lowered.startswith(
+                  ("bump ", "upgrade ", "update dependency", "release ")
+              ):
+                  return "maintenance", cleaned
+              return "other", cleaned
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+          seen = set()
+          for sha, subject in commits:
+              category, cleaned = classify(subject)
+              dedupe_key = cleaned.casefold()
+              if dedupe_key in seen:
+                  continue
+              seen.add(dedupe_key)
+              categories[category].append(
+                  f"- {cleaned} ([`{sha[:7]}`]({server}/{repository}/commit/{sha}))"
+              )
+
+          notes = [
+              "## ✨ Release Overview",
+              "",
+              f"This release delivers the latest stable Android build of **{product_name}**, "
+              "including recent improvements, fixes, and maintenance updates.",
+              "",
+          ]
+          sections = [
+              ("features", "🚀 New Features"),
+              ("fixes", "🐛 Bug Fixes"),
+              ("performance", "⚡ Performance Improvements"),
+              ("maintenance", "🧰 Improvements and Maintenance"),
+              ("documentation", "📝 Documentation"),
+              ("other", "🔄 Other Changes"),
+          ]
+          wrote_changes = False
+          for key, heading in sections:
+              if categories[key]:
+                  notes.extend([f"## {heading}", "", *categories[key], ""])
+                  wrote_changes = True
+          if not wrote_changes:
+              notes.extend(["## 🔄 Changes", "", "- No user-facing changes were recorded for this release.", ""])
+
+          notes.extend(
+              [
+                  "## 📦 Android Downloads",
+                  "",
+                  "| File | Purpose |",
+                  "|---|---|",
+                  *[f"| `{name}` | {purpose} |" for name, purpose in download_rows],
+                  "| `SHA256SUMS.txt` | Verify downloaded files |",
+                  "",
+                  "## ℹ️ Build Information",
+                  "",
+                  f"- **Version:** `{version_name}`",
+                  f"- **Build number:** `{build_number or 'not specified'}`",
+                  f"- **Source commit:** [`{os.environ['GITHUB_SHA'][:7]}`]({server}/{repository}/commit/{os.environ['GITHUB_SHA']})",
+                  "",
+              ]
+          )
+          if previous_tag:
+              notes.extend(
+                  [
+                      "## 🔗 Full Changelog",
+                      "",
+                      f"[{previous_tag}...{tag}]({server}/{repository}/compare/{previous_tag}...{tag})",
+                      "",
+                  ]
+              )
+
+          notes_file = asset_dir / "release-notes.md"
+          notes_file.write_text("\n".join(notes).rstrip() + "\n", encoding="utf-8")
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as handle:
+              handle.write(f"tag={tag}\n")
+              handle.write(f"title={product_name} v{version_name}\n")
+              handle.write(f"asset-dir={asset_dir}\n")
+              handle.write(f"notes-file={notes_file}\n")
+
+          print(notes_file.read_text(encoding="utf-8"))
+          PYTHON
+
+      - name: Publish GitHub Release
+        if: inputs.publish-github-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.prepare-release.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.prepare-release.outputs.title }}
+          RELEASE_ASSET_DIR: ${{ steps.prepare-release.outputs.asset-dir }}
+          RELEASE_NOTES_FILE: ${{ steps.prepare-release.outputs.notes-file }}
+          RELEASE_DRAFT: ${{ inputs.release-draft }}
+          RELEASE_PRERELEASE: ${{ inputs.release-prerelease }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A GitHub Release already exists for tag: $RELEASE_TAG" >&2
+            echo "Increase the version in pubspec.yaml before publishing another release." >&2
+            exit 1
+          fi
+
+          assets=(
+            "$RELEASE_ASSET_DIR"/*.apk
+            "$RELEASE_ASSET_DIR"/*.aab
+            "$RELEASE_ASSET_DIR/SHA256SUMS.txt"
+          )
+          existing_assets=()
+          for asset in "${assets[@]}"; do
+            [ -f "$asset" ] && existing_assets+=("$asset")
+          done
+          [ "${#existing_assets[@]}" -gt 1 ] || {
+            echo "No Android release asset was prepared." >&2
+            exit 1
+          }
+
+          args=(
+            release create "$RELEASE_TAG"
+            --repo "$GITHUB_REPOSITORY"
+            --target "$GITHUB_SHA"
+            --title "$RELEASE_TITLE"
+            --notes-file "$RELEASE_NOTES_FILE"
+          )
+          [ "$RELEASE_DRAFT" = "true" ] && args+=(--draft)
+          [ "$RELEASE_PRERELEASE" = "true" ] && args+=(--prerelease)
+          args+=("${existing_assets[@]}")
+
+          if ! gh "${args[@]}"; then
+            echo "GitHub Release publishing failed. Ensure the caller workflow grants 'contents: write'." >&2
+            exit 1
+          fi
+
+          release_url="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          {
+            echo "## GitHub Release published"
+            echo
+            echo "- Tag: \`$RELEASE_TAG\`"
+            echo "- URL: $release_url"
+          } >> "$GITHUB_STEP_SUMMARY"
