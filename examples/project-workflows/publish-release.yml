@@ -1,16 +1,21 @@
 name: Publish Android Release
 
+# Wrapper-first form: the release policy lives in the builder repo, so this
+# file barely changes between projects — point it at a new app, set the name,
+# done. The older form (calling flutter-build.yml directly and spelling out
+# every input) still works; manual-build.yml and release.yml use that shape.
+
 on:
   workflow_dispatch:
     inputs:
       draft:
         description: Create the GitHub Release as a draft?
-        required: true
+        required: false
         type: boolean
         default: false
       prerelease:
         description: Mark this as a prerelease?
-        required: true
+        required: false
         type: boolean
         default: false
 
@@ -19,21 +24,9 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.1.0
     with:
-      flutter-channel: stable
-      run-format-check: false
-      run-analyze: false
-      run-tests: false
-      build-apk: true
-      build-aab: true
-      artifact-retention-days: 30
-      publish-github-release: true
-      release-name: My Flutter App
+      app-name: My Flutter App
       release-draft: ${{ inputs.draft }}
       release-prerelease: ${{ inputs.prerelease }}
-    secrets:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    secrets: inherit
