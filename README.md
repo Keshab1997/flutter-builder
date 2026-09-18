@@ -32,11 +32,13 @@ my-second-app (আলাদা repository)
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন:
+App project-এর caller workflow-তে tested tag pin করুন (`v1.2.0` = wrapper `publish-release.yml` + `flutter-build.yml` দুটোই নিয়েছে):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
 ```
+
+Release publish করার জন্য `publish-release.yml@v1.2.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
 Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
@@ -101,7 +103,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.1.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.2.0
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -250,7 +252,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -280,14 +282,16 @@ run-tests: false
 Central workflow-তে পরীক্ষিত পরিবর্তনের পর নতুন tag দিন, যেমন:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
+
+wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে নিজের ট্যাগেই পিন করে, তাই নতুন ট্যাগ দেওয়ার সময় wrapper-এর ভেতরের pin-টাও একই ট্যাগে বাড়াতে হবে — নাহলে পুরোনো builder চালু থাকবে।
 
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
 ```
 
 ## প্রয়োজনীয় GitHub Secrets
