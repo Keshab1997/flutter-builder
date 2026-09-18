@@ -1,0 +1,137 @@
+name: Reusable Publish Android Release
+
+# Release-shaped defaults on top of flutter-build.yml, so a project wires this
+# up in six lines instead of re-declaring fifteen inputs on every release path:
+#
+#   name: Publish Android Release
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         draft:     { description: Draft release?, type: boolean, default: false, required: false }
+#         prerelease:{ description: Prerelease?,    type: boolean, default: false, required: false }
+#   permissions:
+#     contents: write
+#   jobs:
+#     publish:
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.1.0
+#       with:
+#         app-name: SpeakEasy
+#       secrets: inherit
+#
+# Nothing heavy lives here: building, signing, note generation, tagging and
+# upload all stay in flutter-build.yml. Keep the @ref on this wrapper identical
+# to the @ref in your other caller workflows — the two files ship together.
+#
+# Deliberately NOT here: auto-bumping pubspec.yaml. The build job checks out
+# the SHA that triggered the run, so a bump committed during the run would not
+# be what gets released. Bump in the PR that precedes the release (the way
+# SpeakEasy does it: "chore: bump version to 1.0.36+36") — scripts/
+# bump-pubspec-version.py in this repo prints the next version for you.
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: "Product name for the release title and asset filenames (empty = pubspec name)"
+        required: false
+        type: string
+        default: ""
+      build-apk:
+        description: Attach a release APK to the GitHub Release
+        required: false
+        type: boolean
+        default: true
+      build-aab:
+        description: Attach a signed release AAB to the GitHub Release
+        required: false
+        type: boolean
+        default: true
+      run-analyze:
+        description: Fail the release if flutter analyze reports anything
+        required: false
+        type: boolean
+        default: false
+      run-tests:
+        description: Fail the release if flutter test fails
+        required: false
+        type: boolean
+        default: false
+      run-format-check:
+        description: Fail the release on Dart formatting drift
+        required: false
+        type: boolean
+        default: false
+      flutter-channel:
+        description: Flutter channel used for the build
+        required: false
+        type: string
+        default: stable
+      java-version:
+        description: Java version used for the Android build
+        required: false
+        type: string
+        default: "17"
+      working-directory:
+        description: Flutter project directory inside the caller repository
+        required: false
+        type: string
+        default: "."
+      artifact-retention-days:
+        description: Days to keep the uploaded APK/AAB workflow artifacts
+        required: false
+        type: number
+        default: 30
+      release-tag:
+        description: "Override the tag (default: v<version-name> from pubspec.yaml)"
+        required: false
+        type: string
+        default: ""
+      release-draft:
+        description: Create the GitHub Release as a draft
+        required: false
+        type: boolean
+        default: false
+      release-prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        description: "Base64-encoded upload-keystore.jks — required for a signed AAB"
+        required: false
+      KEYSTORE_PASSWORD:
+        description: Keystore password
+        required: false
+      KEY_ALIAS:
+        description: Key alias
+        required: false
+      KEY_PASSWORD:
+        description: Key password
+        required: false
+
+jobs:
+  publish:
+    name: Publish Android Release
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.1.0
+    with:
+      flutter-channel: ${{ inputs.flutter-channel }}
+      java-version: ${{ inputs.java-version }}
+      working-directory: ${{ inputs.working-directory }}
+      run-format-check: ${{ inputs.run-format-check }}
+      run-analyze: ${{ inputs.run-analyze }}
+      run-tests: ${{ inputs.run-tests }}
+      build-apk: ${{ inputs.build-apk }}
+      build-aab: ${{ inputs.build-aab }}
+      artifact-retention-days: ${{ inputs.artifact-retention-days }}
+      # The whole point of this wrapper: a release is always published.
+      publish-github-release: true
+      release-name: ${{ inputs.app-name }}
+      release-tag: ${{ inputs.release-tag }}
+      release-draft: ${{ inputs.release-draft }}
+      release-prerelease: ${{ inputs.release-prerelease }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

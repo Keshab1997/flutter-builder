@@ -22,7 +22,7 @@ flutter-builder (এই public repository)
 └── reusable build/release workflow
 
 my-first-app (আলাদা repository)
-└── Flutter source + ছোট caller workflow
+└── Flutter source + ছোট caller workflow (publish-টাও এখন ৬ লাইন)
 
 my-second-app (আলাদা repository)
 └── Flutter source + একই caller workflow
@@ -76,6 +76,43 @@ AAB-এর আগে [Android signing নির্দেশিকা](docs/ANDRO
 ```text
 .github/workflows/publish-release.yml
 ```
+
+**সবচেয়ে ছোট উপায় — publish-টাও reusable** (প্রতিটা project-এ ৩০ লাইনের caller কপি করার দরকার নেই):
+
+```yaml
+name: Publish Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the GitHub Release as a draft?
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark this as a prerelease?
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.1.0
+    with:
+      app-name: SpeakEasy
+      release-draft: ${{ inputs.draft }}
+      release-prerelease: ${{ inputs.prerelease }}
+    secrets: inherit
+```
+
+ব্যস — `build-apk`/`build-aab` default `true`, validation steps default off, `publish-github-release` সবসময় on। প্রয়োজনে override: `run-analyze: true`, `working-directory: apps/mobile`, `artifact-retention-days: 14`।
+
+পুরনো পদ্ধতিটাও চলবে (সরাসরি `flutter-build.yml` কল করে প্রতিটা input নিজে লেখা) — যে project পুরো নিয়ন্ত্রণ চায় তার জন্য। নিচের বাকি অংশ সেটাতেই প্রযোজ্য:
+
 
 Caller workflow-তে নিজের app-এর নাম দিন:
 
@@ -158,6 +195,26 @@ Actions → Workflow run → Artifacts
 সেখানে `android-release-apk` অথবা `android-release-aab` পাওয়া যাবে। Artifact ZIP হিসেবে download হয়; unzip করলে APK/AAB পাওয়া যাবে।
 
 GitHub Release-এ publish করা APK/AAB Actions artifact retention শেষ হলেও expire হয় না; Release delete না করা পর্যন্ত থাকে।
+
+## Version bump (প্রয়োজনে)
+
+`publish-release.yml` ইচ্ছাকৃতভাবে version বাড়ায় না। build job ওই SHA-টাই checkout করে যেটা workflow ট্রিগার করেছে — রানের মাঝে নতুন commit করলে সেটা release-এ ঢুকবে না, উল্টো `pubspec.yaml` আর tag-এর version নিয়ে গোলমাল হবে।
+
+তাই SpeakEasy যেমন করে ঠিক তেমনি — release-এর আগের PR-এ-ই bump:
+
+```text
+chore: bump version to 1.0.37+37
+```
+
+এই repo-র helper পরের version ছাপে (commit করার দায়িত্ব আপনার):
+
+```bash
+python3 scripts/bump-pubspec-version.py --pubspec pubspec.yaml --bump build
+# name=1.0.37+38
+```
+
+`--bump major|minor|patch|build|none`। `patch`/`build`-এ `+N` না থাকলে actionable message দিয়ে exit 1, কারণ Android versionCode ছাড়া Play Store-এ আপলোড যায় না।
+
 
 ## Release version নিয়ম
 
