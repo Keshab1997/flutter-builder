@@ -32,13 +32,13 @@ my-second-app (আলাদা repository)
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন (`v1.2.0` = wrapper `publish-release.yml` + `flutter-build.yml` দুটোই নিয়েছে):
+App project-এর caller workflow-তে tested tag pin করুন (`v1.3.0` = wrapper `publish-release.yml` + `flutter-build.yml` দুটোই নিয়েছে):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.3.0
 ```
 
-Release publish করার জন্য `publish-release.yml@v1.2.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
+Release publish করার জন্য `publish-release.yml@v1.3.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
 Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
@@ -103,7 +103,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.2.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.3.0
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -186,6 +186,31 @@ git push origin v1.0.0
 
 এটি GitHub Release publish করে না; full release publishing-এর জন্য আগের `publish-release.yml` ব্যবহার করুন।
 
+## Build-time configuration (AdMob ID, API base URL ইত্যাদি)
+
+Release build-এ যে মানগুলো compile-time-এ ঢোকাতে হয় — যেমন আসল AdMob ID — সেগুলো caller workflow-এর `dart-defines` input-এ দিন, প্রতি লাইনে একটি `KEY=VALUE`। প্রতিটি লাইন `flutter build apk/appbundle`-এ `--dart-define=KEY=VALUE` হয়ে যায়; খালি value দিলে সেই key skip হয় এবং app-এর নিজের default (যেমন Google-এর test ad unit) বহাল থাকে।
+
+Gradle/`AndroidManifest.xml`-এর placeholder-এর মতো যে মানগুলো environment variable থেকে পড়া হয়, সেগুলো `build-env` input-এ একই ভাবে দিন — build step-গুলোর জন্য export হয়।
+
+```yaml
+jobs:
+  publish:
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.3.0
+    with:
+      app-name: QuizBaaz
+      dart-defines: |
+        ADMOB_APP_ID=${{ vars.ADMOB_APP_ID }}
+        ADMOB_BANNER_ID=${{ vars.ADMOB_BANNER_ID }}
+        ADMOB_INTERSTITIAL_ID=${{ vars.ADMOB_INTERSTITIAL_ID }}
+      build-env: |
+        ADMOB_APP_ID=${{ vars.ADMOB_APP_ID }}
+    secrets: inherit
+```
+
+মানগুলো caller repo-র **Settings → Secrets and variables → Actions → Variables**-এ রাখলে workflow file-এ hardcode করতে হয় না। মনে রাখবেন: dart-define-এর মান binary-র ভেতরে চলে যায় — AdMob ID public identifier, এতে সমস্যা নেই; কিন্তু API key/password এভাবে দেবেন না। AAB step-এর Gradle fallback-ও একই define পায়, তাই strip-workaround path দিয়ে গেলেও test ID দিয়ে bundle তৈরি হবে না।
+
+`ANDROID_KEYSTORE_BASE64` secret থাকলে APK-only build-ও এখন upload key দিয়ে sign হয় (আগে শুধু AAB/Release-এ হত) — যে project-এর Gradle `key.properties` ছাড়া release build-ই করতে দেয় না, তার APK build এতে আর fail করে না।
+
 ## Artifact download
 
 Workflow সফল হলে:
@@ -252,7 +277,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.3.0
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -282,8 +307,8 @@ run-tests: false
 Central workflow-তে পরীক্ষিত পরিবর্তনের পর নতুন tag দিন, যেমন:
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে নিজের ট্যাগেই পিন করে, তাই নতুন ট্যাগ দেওয়ার সময় wrapper-এর ভেতরের pin-টাও একই ট্যাগে বাড়াতে হবে — নাহলে পুরোনো builder চালু থাকবে।
@@ -291,7 +316,7 @@ wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে ন�
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.2.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.3.0
 ```
 
 ## প্রয়োজনীয় GitHub Secrets

@@ -53,6 +53,21 @@ on:
         required: false
         type: boolean
         default: false
+      dart-defines:
+        description: >-
+          Compile-time Dart defines for the APK/AAB, one KEY=VALUE per line
+          (each becomes --dart-define=KEY=VALUE; blank values are skipped so the
+          app's own default applies). Not for secrets - the values end up in the binary.
+        required: false
+        type: string
+        default: ""
+      build-env:
+        description: >-
+          Environment variables exported for the build steps, one KEY=VALUE per
+          line (e.g. a value Gradle reads for an AndroidManifest placeholder).
+        required: false
+        type: string
+        default: ""
       artifact-retention-days:
         description: Number of days to keep build artifacts
         required: false
@@ -183,8 +198,12 @@ jobs:
             echo "No *_test.dart files found; test step skipped."
           fi
 
+      # Signing is mandatory for an AAB or a GitHub Release. For an APK-only build
+      # it is applied whenever the keystore secret is present, so projects whose
+      # Gradle refuses to build a release without key.properties still work and
+      # the test APK carries the same upload-key signature as the Play build.
       - name: Verify Android signing secrets
-        if: inputs.build-aab || inputs.publish-github-release
+        if: inputs.build-aab || inputs.publish-github-release || env.HAS_ANDROID_KEYSTORE != ''
         env:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
@@ -198,7 +217,7 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
 
       - name: Configure Android signing
-        if: inputs.build-aab || inputs.publish-github-release
+        if: inputs.build-aab || inputs.publish-github-release || env.HAS_ANDROID_KEYSTORE != ''
         env:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS_VALUE: ${{ secrets.KEY_ALIAS }}
@@ -214,7 +233,7 @@ jobs:
           chmod 600 android/app/upload-keystore.jks android/key.properties
 
       - name: Configure generated Android Gradle signing
-        if: (inputs.build-aab || inputs.publish-github-release) && inputs.generate-android-platform
+        if: (inputs.build-aab || inputs.publish-github-release || env.HAS_ANDROID_KEYSTORE != '') && inputs.generate-android-platform
         run: |
           python3 - <<'PYTHON'
           from pathlib import Path
@@ -288,13 +307,113 @@ jobs:
               raise SystemExit("No Android app Gradle file was found")
           PYTHON
 
+      - name: Prepare Dart defines and build environment
+        if: inputs.build-apk || inputs.build-aab
+        id: dart-defines
+        env:
+          DART_DEFINES_INPUT: ${{ inputs.dart-defines }}
+          BUILD_ENV_INPUT: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+
+          # Both inputs share one shape: KEY=VALUE per line, blank lines and
+          # '#' comments ignored. Values are never echoed - they are not
+          # secrets by design, but a caller may still not want them in logs.
+          trim() {
+            local s="${1%$'\r'}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            printf '%s' "${s%"${s##*[![:space:]]}"}"
+          }
+
+          defines_file="$RUNNER_TEMP/dart-defines.txt"
+          : > "$defines_file"
+          define_keys=()
+          while IFS= read -r raw || [ -n "$raw" ]; do
+            line="$(trim "$raw")"
+            [ -n "$line" ] && [ "${line:0:1}" != "#" ] || continue
+            key="${line%%=*}"
+            value="${line#*=}"
+            if [ "$key" = "$line" ]; then
+              echo "::error::dart-defines: '$line' is not KEY=VALUE."
+              exit 1
+            fi
+            if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_.]*$ ]]; then
+              echo "::error::dart-defines: invalid name '$key' (letters, digits, '_' and '.' only)."
+              exit 1
+            fi
+            if [ -z "$value" ]; then
+              echo "::notice::dart-defines: $key is empty and was skipped; the app's compile-time default applies."
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$defines_file"
+            define_keys+=("$key")
+          done <<< "$DART_DEFINES_INPUT"
+
+          # Gradle's fallback path (see the AAB step) needs the defines in the
+          # form the Flutter tool hands to Gradle: base64 per entry, comma-joined.
+          gradle_defines=""
+          while IFS= read -r line; do
+            gradle_defines="${gradle_defines:+$gradle_defines,}$(printf '%s' "$line" | base64 -w0)"
+          done < "$defines_file"
+          echo "gradle-dart-defines=$gradle_defines" >> "$GITHUB_OUTPUT"
+
+          env_keys=()
+          while IFS= read -r raw || [ -n "$raw" ]; do
+            line="$(trim "$raw")"
+            [ -n "$line" ] && [ "${line:0:1}" != "#" ] || continue
+            key="${line%%=*}"
+            value="${line#*=}"
+            if [ "$key" = "$line" ]; then
+              echo "::error::build-env: '$line' is not KEY=VALUE."
+              exit 1
+            fi
+            if ! [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "::error::build-env: invalid variable name '$key'."
+              exit 1
+            fi
+            case "$key" in
+              PATH|HOME|SHELL|CI|NODE_OPTIONS|GITHUB_*|RUNNER_*|ACTIONS_*)
+                echo "::error::build-env: refusing to override protected variable '$key'."
+                exit 1
+                ;;
+            esac
+            if [ -z "$value" ]; then
+              echo "::notice::build-env: $key is empty and was skipped."
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            env_keys+=("$key")
+          done <<< "$BUILD_ENV_INPUT"
+
+          join() { local out=""; for k in "$@"; do out="${out:+$out, }$k"; done; printf '%s' "${out:-none}"; }
+          echo "Dart defines (values hidden): $(join "${define_keys[@]}")"
+          echo "Build environment (values hidden): $(join "${env_keys[@]}")"
+          {
+            echo "## Build-time configuration"
+            echo
+            echo "- Dart defines: $(join "${define_keys[@]}")"
+            echo "- Build environment: $(join "${env_keys[@]}")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build release APK
         if: inputs.build-apk
-        run: flutter build apk --release
+        run: |
+          dart_define_args=()
+          while IFS= read -r line; do
+            dart_define_args+=("--dart-define=$line")
+          done < "$RUNNER_TEMP/dart-defines.txt"
+          flutter build apk --release "${dart_define_args[@]}"
 
       - name: Build signed release AAB
         if: inputs.build-aab
+        env:
+          GRADLE_DART_DEFINES: ${{ steps.dart-defines.outputs.gradle-dart-defines }}
         run: |
+          dart_define_args=()
+          while IFS= read -r line; do
+            dart_define_args+=("--dart-define=$line")
+          done < "$RUNNER_TEMP/dart-defines.txt"
+
           # TODO(revert): Workaround for the Flutter 3.44+ AAB strip regression
           # (flutter/flutter#186810 — "Release app bundle failed to strip debug
           # symbols from native libraries"). Once a STABLE Flutter release fixes
@@ -309,8 +428,12 @@ jobs:
           # valid .aab before that step fails, so let flutter run it (it may
           # fail at the strip) and then ensure the artifact exists by invoking
           # Gradle's bundleRelease directly, bypassing Flutter's broken wrapper.
-          flutter build appbundle --release || true
-          test -f build/app/outputs/bundle/release/app-release.aab || (cd android && ./gradlew bundleRelease)
+          flutter build appbundle --release "${dart_define_args[@]}" || true
+          # The fallback must receive the same defines, otherwise the bundle
+          # would silently compile with the app's defaults (e.g. test ad units).
+          test -f build/app/outputs/bundle/release/app-release.aab || (
+            cd android && ./gradlew bundleRelease ${GRADLE_DART_DEFINES:+"-Pdart-defines=$GRADLE_DART_DEFINES"}
+          )
 
       - name: Upload APK artifact
         if: inputs.build-apk
