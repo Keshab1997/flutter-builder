@@ -98,6 +98,123 @@ on:
         required: false
         type: boolean
         default: false
+      # ---------------------------------------------------------------
+      # Validation and quality gates
+      # ---------------------------------------------------------------
+      code-coverage:
+        description: Run flutter test with coverage and report the percentage
+        required: false
+        type: boolean
+        default: false
+      upload-coverage-codecov:
+        description: Upload the coverage report to Codecov (CODECOV_TOKEN only needed for private repos)
+        required: false
+        type: boolean
+        default: false
+      max-artifact-size-mb:
+        description: Fail the build when an APK/AAB is larger than this many MB (0 disables the check)
+        required: false
+        type: number
+        default: 0
+      verify-signing:
+        description: Verify the signature of the built APK/AAB before it is published
+        required: false
+        type: boolean
+        default: true
+      fail-on-placeholders:
+        description: Fail when Google test ad unit IDs, com.example ids or debug signing are still in the release
+        required: false
+        type: boolean
+        default: false
+      check-version-bump:
+        description: Fail when pubspec.yaml is not newer than the latest release tag
+        required: false
+        type: boolean
+        default: false
+      # ---------------------------------------------------------------
+      # Build options
+      # ---------------------------------------------------------------
+      obfuscate:
+        description: Build with --obfuscate --split-debug-info (Flutter release hardening)
+        required: false
+        type: boolean
+        default: false
+      upload-symbols:
+        description: Upload the obfuscation symbols as a build artifact
+        required: false
+        type: boolean
+        default: true
+      split-per-abi:
+        description: Build one APK per ABI instead of a single fat APK
+        required: false
+        type: boolean
+        default: false
+      build-web:
+        description: Build a release web bundle and upload it as an artifact
+        required: false
+        type: boolean
+        default: false
+      deploy-web-pages:
+        description: >-
+          Deploy the web build to GitHub Pages (caller needs contents: write)
+        required: false
+        type: boolean
+        default: false
+      codegen:
+        description: Code generation to run before validation (none, build_runner, gen-l10n, both)
+        required: false
+        type: string
+        default: none
+      use-fvm:
+        description: Pin the Flutter version from the project .fvmrc file
+        required: false
+        type: boolean
+        default: false
+      test-matrix:
+        description: >-
+          Extra Flutter channels to validate, comma separated
+          (for example stable,beta)
+        required: false
+        type: string
+        default: ""
+      # ---------------------------------------------------------------
+      # Distribution
+      # ---------------------------------------------------------------
+      play-track:
+        description: Google Play track for the AAB upload (empty disables the upload)
+        required: false
+        type: string
+        default: ""
+      play-package-name:
+        description: Android package name used for the Google Play upload
+        required: false
+        type: string
+        default: ""
+      play-status:
+        description: Google Play release status (completed, draft, halted, inProgress)
+        required: false
+        type: string
+        default: completed
+      firebase-groups:
+        description: Firebase App Distribution groups (empty disables the upload)
+        required: false
+        type: string
+        default: ""
+      firebase-app-id:
+        description: Firebase Android app id used for App Distribution
+        required: false
+        type: string
+        default: ""
+      pr-comment:
+        description: Comment the build summary on the pull request
+        required: false
+        type: boolean
+        default: false
+      notify-webhook:
+        description: Discord or Slack webhook URL that receives the build summary
+        required: false
+        type: string
+        default: ""
     secrets:
       ANDROID_KEYSTORE_BASE64:
         description: Base64-encoded upload-keystore.jks (required for AAB or GitHub Release publishing)
@@ -110,6 +227,15 @@ on:
         required: false
       KEY_PASSWORD:
         description: Android upload key password (required for AAB or GitHub Release publishing)
+        required: false
+      CODECOV_TOKEN:
+        description: Codecov upload token (only needed for private repositories)
+        required: false
+      PLAY_SERVICE_ACCOUNT_JSON:
+        description: Google Play service account JSON used for the AAB upload
+        required: false
+      FIREBASE_SERVICE_CREDENTIALS:
+        description: Firebase service account credentials used for App Distribution
         required: false
 
 jobs:
@@ -139,10 +265,44 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
+      - name: Resolve Flutter version
+        id: flutter-version
+        run: |
+          version=""
+          if [ "${{ inputs.use-fvm }}" = "true" ]; then
+            if [ -f .fvmrc ]; then
+              version="$(python3 - <<'PYTHON'
+          import json, re
+          try:
+              print(json.load(open(".fvmrc")).get("flutter", ""))
+          except Exception:
+              match = re.search(r'"flutter"\s*:\s*"([^"]+)"', open(".fvmrc").read())
+              print(match.group(1) if match else "")
+          PYTHON
+          )"
+            else
+              echo "::warning::use-fvm is set but no .fvmrc file was found; using the ${{ inputs.flutter-channel }} channel."
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$version" ]; then
+            echo "Using the Flutter version pinned in .fvmrc: $version"
+          else
+            echo "Using the ${{ inputs.flutter-channel }} Flutter channel."
+          fi
+
       - name: Set up Flutter
+        if: steps.flutter-version.outputs.version == ''
         uses: subosito/flutter-action@v2
         with:
           channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Set up Flutter (version pinned by .fvmrc)
+        if: steps.flutter-version.outputs.version != ''
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
       - name: Show tool versions
@@ -181,6 +341,23 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Run code generation
+        if: inputs.codegen != 'none' && inputs.codegen != ''
+        run: |
+          case "${{ inputs.codegen }}" in
+            build_runner|both)
+              echo "Running build_runner build..."
+              dart run build_runner build --delete-conflicting-outputs
+              ;;
+          esac
+          case "${{ inputs.codegen }}" in
+            gen-l10n|both)
+              echo "Generating localizations..."
+              flutter gen-l10n
+              ;;
+          esac
+          echo "Code generation finished (${{ inputs.codegen }})."
+
       - name: Check Dart formatting
         if: inputs.run-format-check
         run: dart format --output=none --set-exit-if-changed .
@@ -193,10 +370,122 @@ jobs:
         if: inputs.run-tests
         run: |
           if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
-            flutter test
+            if [ "${{ inputs.code-coverage }}" = "true" ]; then
+              echo "Running tests with coverage..."
+              flutter test --coverage
+            else
+              flutter test
+            fi
           else
             echo "No *_test.dart files found; test step skipped."
           fi
+
+      - name: Report test coverage
+        if: inputs.code-coverage && inputs.run-tests
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "No coverage/lcov.info was produced; nothing to report."
+            exit 0
+          fi
+          total="$(grep -c '^DA:' coverage/lcov.info || true)"
+          hit="$(grep '^DA:' coverage/lcov.info | awk -F, '$2 > 0 {n++} END {print n + 0}' || true)"
+          if [ "${total:-0}" -gt 0 ]; then
+            pct="$(awk -v h="$hit" -v t="$total" 'BEGIN {printf "%.1f", h * 100 / t}')%"
+          else
+            pct="n/a"
+          fi
+          echo "Coverage: $hit / $total lines ($pct)"
+          {
+            echo "### Test coverage"
+            echo ""
+            echo "| Lines covered | Coverage |"
+            echo "|---|---|"
+            echo "| $hit / $total | **$pct** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        if: inputs.code-coverage && inputs.upload-coverage-codecov && inputs.run-tests
+        uses: codecov/codecov-action@v5
+        with:
+          files: ${{ inputs.working-directory }}/coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Check version bump against the last release
+        if: inputs.check-version-bump
+        run: |
+          version="$(awk '/^version:/{print $2; exit}' pubspec.yaml)"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read a version: line from pubspec.yaml."
+            exit 1
+          fi
+          name="${version%%+*}"
+          code="${version##*+}"
+          last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+          if [ -z "$last_tag" ]; then
+            echo "No previous release tag found; nothing to compare against."
+            exit 0
+          fi
+          prefix="$(git rev-parse --show-prefix)"
+          last_pubspec="$(git show "$last_tag:${prefix}pubspec.yaml" 2>/dev/null || true)"
+          last_version="$(printf '%s\n' "$last_pubspec" | awk '/^version:/{print $2; exit}')"
+          if [ -z "$last_version" ]; then
+            echo "Could not read pubspec.yaml from $last_tag; skipping the check."
+            exit 0
+          fi
+          last_name="${last_version%%+*}"
+          last_code="${last_version##*+}"
+          echo "Current version: $name+$code"
+          echo "Last release ($last_tag): $last_name+$last_code"
+          failed=0
+          case "$code" in
+            ''|*[!0-9]*)
+              echo "::error::pubspec.yaml has no numeric build number (expected version: name+code)."
+              failed=1
+              ;;
+            *)
+              if [ "$code" -le "$last_code" ]; then
+                echo "::error::versionCode $code is not greater than $last_code. Play Store rejects an upload that does not raise versionCode."
+                failed=1
+              fi
+              ;;
+          esac
+          if [ "$name" = "$last_name" ]; then
+            echo "::error::versionName $name is unchanged since $last_tag."
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "pubspec.yaml is newer than $last_tag."
+
+      - name: Detect release placeholders
+        if: inputs.fail-on-placeholders
+        run: |
+          failed=0
+          # Google's public test ad unit IDs must never reach a release build.
+          if grep -rniE 'ca-app-pub-3940256099942544' lib pubspec.yaml 2>/dev/null; then
+            echo "::error::A Google test ad unit ID (ca-app-pub-3940256099942544) is still in the source. Replace the AdMob test IDs with the real ones."
+            failed=1
+          else
+            echo "No Google test ad unit IDs found."
+          fi
+          # Placeholder application ids left over from 'flutter create'.
+          if grep -rniE 'com\.example\.' lib android/app/src android/app/build.gradle android/app/build.gradle.kts android/app/src/main/AndroidManifest.xml 2>/dev/null; then
+            echo "::error::A placeholder application id (com.example.*) is still configured."
+            failed=1
+          else
+            echo "No placeholder application ids found."
+          fi
+          # A release signed with the debug key is installable but not publishable.
+          if grep -rniE 'signingConfig[[:space:]]*=[\. ]*signingConfigs\.getByName\("debug"\)' android/app/build.gradle android/app/build.gradle.kts 2>/dev/null; then
+            echo "::warning::The release build type can fall back to the debug signing key. Make sure a real upload key is configured before publishing."
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "Placeholder check failed. Set fail-on-placeholders: false to override."
+            exit 1
+          fi
+          echo "No release placeholders found."
 
       # Signing is mandatory for an AAB or a GitHub Release. For an APK-only build
       # it is applied whenever the keystore secret is present, so projects whose
@@ -402,7 +691,14 @@ jobs:
           while IFS= read -r line; do
             dart_define_args+=("--dart-define=$line")
           done < "$RUNNER_TEMP/dart-defines.txt"
-          flutter build apk --release "${dart_define_args[@]}"
+          extra_args=()
+          if [ "${{ inputs.split-per-abi }}" = "true" ]; then
+            extra_args+=(--split-per-abi)
+          fi
+          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+            extra_args+=(--obfuscate --split-debug-info=build/symbols)
+          fi
+          flutter build apk --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}"
 
       - name: Build signed release AAB
         if: inputs.build-aab
@@ -428,12 +724,112 @@ jobs:
           # valid .aab before that step fails, so let flutter run it (it may
           # fail at the strip) and then ensure the artifact exists by invoking
           # Gradle's bundleRelease directly, bypassing Flutter's broken wrapper.
-          flutter build appbundle --release "${dart_define_args[@]}" || true
+          extra_args=()
+          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+            extra_args+=(--obfuscate --split-debug-info=build/symbols)
+          fi
+          flutter build appbundle --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}" || true
           # The fallback must receive the same defines, otherwise the bundle
           # would silently compile with the app's defaults (e.g. test ad units).
           test -f build/app/outputs/bundle/release/app-release.aab || (
             cd android && ./gradlew bundleRelease ${GRADLE_DART_DEFINES:+"-Pdart-defines=$GRADLE_DART_DEFINES"}
           )
+
+      - name: Check artifact size limit
+        if: inputs.build-apk || inputs.build-aab
+        env:
+          MAX_MB: ${{ inputs.max-artifact-size-mb }}
+        run: |
+          if [ "$MAX_MB" = "0" ] || [ -z "$MAX_MB" ]; then
+            echo "No artifact size limit configured."
+            exit 0
+          fi
+          failed=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            bytes="$(stat -c%s "$f")"
+            mb="$(awk -v b="$bytes" 'BEGIN {printf "%.2f", b / 1048576}')"
+            over="$(awk -v m="$mb" -v x="$MAX_MB" 'BEGIN {print (m > x) ? "yes" : "no"}')"
+            if [ "$over" = "yes" ]; then
+              echo "::error::$f is $mb MB, above the $MAX_MB MB limit."
+              failed=1
+            else
+              echo "$f is $mb MB (limit $MAX_MB MB)."
+            fi
+          done < <(find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null)
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All artifacts are within the size limit."
+
+      - name: Verify release signing
+        if: inputs.verify-signing && (inputs.build-apk || inputs.build-aab)
+        run: |
+          failed=0
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          apksigner="$(ls "$sdk"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
+          found_apk=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            found_apk=1
+            if [ -z "$apksigner" ]; then
+              echo "::warning::apksigner was not found under $sdk/build-tools; cannot verify $f."
+              continue
+            fi
+            echo "Verifying signature of $f"
+            if "$apksigner" verify --print-certs "$f" > /tmp/apksigner.out 2>&1; then
+              head -5 /tmp/apksigner.out
+            else
+              echo "::error::$f failed apksigner verification:"
+              cat /tmp/apksigner.out
+              failed=1
+            fi
+          done < <(find build/app/outputs -type f -name '*.apk' 2>/dev/null)
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            echo "Verifying signature of $f"
+            if unzip -l "$f" 2>/dev/null | grep -qE 'META-INF/.*\.(RSA|DSA|EC)'; then
+              echo "$f carries a signature in META-INF."
+            else
+              echo "::error::$f does not look signed (no META-INF signature)."
+              failed=1
+            fi
+          done < <(find build/app/outputs -type f -name '*.aab' 2>/dev/null)
+          if [ "$found_apk" -eq 0 ] && ! find build/app/outputs -type f -name '*.aab' 2>/dev/null | grep -q .; then
+            echo "No APK or AAB was built; nothing to verify."
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Release artifacts are signed."
+
+      - name: Upload obfuscation symbols
+        if: inputs.obfuscate && inputs.upload-symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-symbols
+          path: ${{ inputs.working-directory }}/build/symbols
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: Build web
+        if: inputs.build-web
+        run: flutter build web --release
+
+      - name: Upload web artifact
+        if: inputs.build-web
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web
+          path: ${{ inputs.working-directory }}/build/web
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: Deploy web to GitHub Pages
+        if: inputs.build-web && inputs.deploy-web-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ inputs.working-directory }}/build/web
 
       - name: Upload APK artifact
         if: inputs.build-apk
@@ -452,6 +848,46 @@ jobs:
           path: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: Resolve distribution artifact
+        id: distribution-file
+        if: inputs.firebase-groups != '' || inputs.play-track != ''
+        run: |
+          chosen=""
+          for candidate in \
+            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            build/app/outputs/bundle/release/app-release.aab; do
+            if [ -f "$candidate" ]; then
+              chosen="$candidate"
+              break
+            fi
+          done
+          if [ -z "$chosen" ]; then
+            echo "::error::No APK or AAB was found to distribute. Enable build-apk or build-aab."
+            exit 1
+          fi
+          echo "file=$chosen" >> "$GITHUB_OUTPUT"
+          echo "Distributing $chosen"
+
+      - name: Upload to Firebase App Distribution
+        if: inputs.firebase-groups != ''
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ inputs.firebase-app-id }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS }}
+          groups: ${{ inputs.firebase-groups }}
+          file: ${{ steps.distribution-file.outputs.file }}
+
+      - name: Upload AAB to Google Play
+        if: inputs.play-track != '' && inputs.build-aab
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ inputs.play-package-name }}
+          releaseFiles: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.play-track }}
+          status: ${{ inputs.play-status }}
 
       - name: Prepare GitHub Release and English release notes
         if: inputs.publish-github-release
@@ -727,3 +1163,160 @@ jobs:
             echo "- Tag: \`$RELEASE_TAG\`"
             echo "- URL: $release_url"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build summary
+        if: always()
+        run: |
+          {
+            echo "## Flutter build summary"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Workflow | ${{ github.workflow }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Job status | **${{ job.status }}** |"
+            if [ -f coverage/lcov.info ]; then
+              total="$(grep -c '^DA:' coverage/lcov.info || true)"
+              hit="$(grep '^DA:' coverage/lcov.info | awk -F, '$2 > 0 {n++} END {print n + 0}' || true)"
+              if [ "${total:-0}" -gt 0 ]; then
+                pct="$(awk -v h="$hit" -v t="$total" 'BEGIN {printf "%.1f", h * 100 / t}')%"
+              else
+                pct="n/a"
+              fi
+              echo "| Coverage | $hit / $total lines ($pct) |"
+            fi
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              bytes="$(stat -c%s "$f")"
+              mb="$(awk -v b="$bytes" 'BEGIN {printf "%.2f", b / 1048576}')"
+              echo "| \`$(basename "$f")\` | $mb MB |"
+            done < <(find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null | sort)
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the summary on the pull request
+        if: always() && inputs.pr-comment && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_FILE: ${{ env.GITHUB_STEP_SUMMARY }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- flutter-builder-summary -->';
+            let body = 'Flutter build finished.';
+            if (process.env.SUMMARY_FILE && fs.existsSync(process.env.SUMMARY_FILE)) {
+              body = fs.readFileSync(process.env.SUMMARY_FILE, 'utf8');
+            }
+            const text = `${marker}\n${body}`;
+            const issueNumber = context.payload.pull_request.number;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body: text,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issueNumber,
+                body: text,
+              });
+            }
+
+      - name: Notify webhook
+        if: always() && inputs.notify-webhook != ''
+        env:
+          WEBHOOK_URL: ${{ inputs.notify-webhook }}
+        run: |
+          message="Flutter build ${{ job.status }} for ${{ github.repository }} @ ${{ github.ref_name }} (${{ github.sha }})"
+          payload="$(WEBHOOK_URL="$WEBHOOK_URL" MESSAGE="$message" python3 - <<'PYTHON'
+          import json, os
+          print(json.dumps({"content": os.environ["MESSAGE"], "text": os.environ["MESSAGE"]}))
+          PYTHON
+          )"
+          if curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' -d "$payload" "$WEBHOOK_URL" > /tmp/webhook.out 2>&1; then
+            echo "Webhook notified."
+          else
+            echo "::warning::Webhook notification failed:"
+            cat /tmp/webhook.out
+          fi
+
+  # Optional second job: validate the same source against extra Flutter
+  # channels so a breaking change on another channel is caught before release.
+  prepare-matrix:
+    name: Prepare Flutter channel matrix
+    if: inputs.test-matrix != ''
+    runs-on: ubuntu-latest
+    outputs:
+      channels: ${{ steps.channels.outputs.channels }}
+    steps:
+      - name: Build the channel list
+        id: channels
+        run: |
+          raw="${{ inputs.test-matrix }}"
+          case "$raw" in
+            \[*)
+              echo "channels=$raw" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              channels="$(python3 -c 'import json, sys; print(json.dumps([c.strip() for c in sys.argv[1].split(",") if c.strip()]))' "$raw")"
+              echo "channels=$channels" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          echo "Channels to validate: ${{ inputs.test-matrix }}"
+
+  matrix-validate:
+    name: Validate on ${{ matrix.flutter-channel }}
+    needs: prepare-matrix
+    if: inputs.test-matrix != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter-channel: ${{ fromJSON(needs.prepare-matrix.outputs.channels) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout caller project
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.flutter-channel }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check Dart formatting
+        if: inputs.run-format-check
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze source code
+        if: inputs.run-analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Run tests
+        if: inputs.run-tests
+        run: |
+          if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
+            flutter test
+          else
+            echo "No *_test.dart files found; test step skipped."
+          fi

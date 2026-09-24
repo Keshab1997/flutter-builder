@@ -1,0 +1,40 @@
+name: Flutter CI (smart)
+
+# Same as ci.yml, but with every v1.4.0 quality gate switched on. Drop the
+# inputs you do not need; each one is independent.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+    with:
+      flutter-channel: stable
+      working-directory: flutter_app
+      run-format-check: true
+      run-analyze: true
+      run-tests: true
+      # Quality gates
+      code-coverage: true
+      upload-coverage-codecov: true
+      max-artifact-size-mb: 150
+      test-matrix: stable,beta
+      # Build-time needs
+      codegen: build_runner
+      use-fvm: false
+      # No artifacts on ordinary pushes; use Manual Android Build for those.
+      build-apk: false
+      build-aab: false
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

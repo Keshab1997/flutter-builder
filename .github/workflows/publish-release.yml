@@ -13,7 +13,7 @@ name: Reusable Publish Android Release
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.3.0
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.4.0
 #       with:
 #         app-name: SpeakEasy
 #       secrets: inherit
@@ -106,6 +106,91 @@ on:
         required: false
         type: string
         default: ""
+      fail-on-placeholders:
+        description: "Fail the release when Google test ad unit IDs, com.example ids or debug signing are still in the source (on by default here)"
+        required: false
+        type: boolean
+        default: true
+      check-version-bump:
+        description: "Fail the release when pubspec.yaml is not newer than the latest release tag (on by default here)"
+        required: false
+        type: boolean
+        default: true
+      verify-signing:
+        description: "Verify the signature of the built APK/AAB before publishing"
+        required: false
+        type: boolean
+        default: true
+      obfuscate:
+        description: "Build with --obfuscate --split-debug-info and upload the symbols"
+        required: false
+        type: boolean
+        default: false
+      split-per-abi:
+        description: "Build one APK per ABI instead of a single fat APK"
+        required: false
+        type: boolean
+        default: false
+      max-artifact-size-mb:
+        description: "Fail the release when an APK/AAB is larger than this many MB (0 disables the check)"
+        required: false
+        type: number
+        default: 0
+      code-coverage:
+        description: "Run flutter test with coverage and report the percentage"
+        required: false
+        type: boolean
+        default: false
+      test-matrix:
+        description: "Extra Flutter channels to validate, comma separated (for example stable,beta)"
+        required: false
+        type: string
+        default: ""
+      codegen:
+        description: "Code generation to run before validation (none, build_runner, gen-l10n, both)"
+        required: false
+        type: string
+        default: none
+      use-fvm:
+        description: "Pin the Flutter version from the project .fvmrc file"
+        required: false
+        type: boolean
+        default: false
+      pr-comment:
+        description: "Comment the build summary on the pull request"
+        required: false
+        type: boolean
+        default: false
+      notify-webhook:
+        description: "Discord or Slack webhook URL that receives the build summary"
+        required: false
+        type: string
+        default: ""
+      play-track:
+        description: "Google Play track for the AAB upload (empty disables the upload)"
+        required: false
+        type: string
+        default: ""
+      play-package-name:
+        description: "Android package name used for the Google Play upload"
+        required: false
+        type: string
+        default: ""
+      play-status:
+        description: "Google Play release status (completed, draft, halted, inProgress)"
+        required: false
+        type: string
+        default: completed
+      firebase-groups:
+        description: "Firebase App Distribution groups (empty disables the upload)"
+        required: false
+        type: string
+        default: ""
+      firebase-app-id:
+        description: "Firebase Android app id used for App Distribution"
+        required: false
+        type: string
+        default: ""
     secrets:
       ANDROID_KEYSTORE_BASE64:
         description: "Base64-encoded upload-keystore.jks — required for a signed AAB"
@@ -119,11 +204,20 @@ on:
       KEY_PASSWORD:
         description: Key password
         required: false
+      CODECOV_TOKEN:
+        description: Codecov upload token (only needed for private repositories)
+        required: false
+      PLAY_SERVICE_ACCOUNT_JSON:
+        description: Google Play service account JSON used for the AAB upload
+        required: false
+      FIREBASE_SERVICE_CREDENTIALS:
+        description: Firebase service account credentials used for App Distribution
+        required: false
 
 jobs:
   publish:
     name: Publish Android Release
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.3.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
@@ -142,8 +236,31 @@ jobs:
       release-prerelease: ${{ inputs.release-prerelease }}
       dart-defines: ${{ inputs.dart-defines }}
       build-env: ${{ inputs.build-env }}
+      # Release safety nets. On by default for the release path: a release is
+      # exactly the build you do not want to ship with test ad units or an
+      # unchanged versionCode.
+      fail-on-placeholders: ${{ inputs.fail-on-placeholders }}
+      check-version-bump: ${{ inputs.check-version-bump }}
+      verify-signing: ${{ inputs.verify-signing }}
+      obfuscate: ${{ inputs.obfuscate }}
+      split-per-abi: ${{ inputs.split-per-abi }}
+      max-artifact-size-mb: ${{ inputs.max-artifact-size-mb }}
+      code-coverage: ${{ inputs.code-coverage }}
+      test-matrix: ${{ inputs.test-matrix }}
+      codegen: ${{ inputs.codegen }}
+      use-fvm: ${{ inputs.use-fvm }}
+      pr-comment: ${{ inputs.pr-comment }}
+      notify-webhook: ${{ inputs.notify-webhook }}
+      play-track: ${{ inputs.play-track }}
+      play-package-name: ${{ inputs.play-package-name }}
+      play-status: ${{ inputs.play-status }}
+      firebase-groups: ${{ inputs.firebase-groups }}
+      firebase-app-id: ${{ inputs.firebase-app-id }}
     secrets:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      FIREBASE_SERVICE_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS }}
