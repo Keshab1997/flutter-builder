@@ -5,6 +5,10 @@ key.properties
 .env
 keystore-base64.txt
 
+# Python test caches
+__pycache__/
+*.py[cod]
+
 # Editors and OS
 .idea/
 .vscode/

@@ -2,6 +2,7 @@
 
 একটি reusable GitHub Actions workflow, যা বিভিন্ন Flutter project-এর জন্য একই central setup ব্যবহার করে:
 
+- যেকোনো GitHub-hosted Flutter project-এ এক কমান্ডে caller workflow installer
 - Dart format check
 - `flutter analyze`
 - `flutter test` (+ coverage report)
@@ -33,17 +34,48 @@ my-second-app (আলাদা repository)
 └── Flutter source + একই caller workflow
 ```
 
-## প্রথমবার setup
+## এক কমান্ডে setup (v1.5.0)
+
+GitHub-এ host করা Flutter project-এর directory থেকে **Linux / macOS / Windows Git Bash**-এ চালান (Bash ও curl লাগে; Flutter SDK installer-এর জন্য লাগে না):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.5.0/scripts/install.sh | bash
+```
+
+Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ চারটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.5.0`** tag-এ reusable builder pin করে:
+
+| ফাইল | কখন চলে |
+|---|---|
+| `ci.yml` | সব branch-এর push / PR / manual: format, analyze, test, coverage; APK/AAB নয় |
+| `manual-build.yml` | Actions থেকে ম্যানুয়ালি APK বা AAB |
+| `publish-release.yml` | Actions থেকে ম্যানুয়ালি signed APK/AAB + GitHub Release |
+| `release.yml` | `v*` tag push হলে শুধু signed AAB artifact; GitHub Release নয় |
+
+**Monorepo-তে একাধিক Flutter app থাকলে** ইচ্ছামতো একটি বেছে দিন (path repo root থেকে):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.5.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+```
+
+একাধিক app পেলে script আন্দাজ করে ভুলটা বেছে নেবে না; `--app-dir` চাইবে। `--app-name` না দিলে release title-এ `pubspec.yaml`-এর নাম ব্যবহার হয়। `--ref v1.4.0` দিয়ে পুরোনো tested version pin করা যায়; সাধারণত default tag-ই রাখুন। আগে কী লিখবে দেখতে `--dry-run` দিন।
+
+**Existing workflow নিরাপদ:** একই নামের customized file পেলে **কোনো file-ই পরিবর্তন না করে** error দেয়। `--force` দিলে পুরোনোগুলো `.github/flutter-builder-backups/<timestamp>/`-এ backup রেখে replace করে; ব্যবহার করার আগে diff দেখে নিন। দ্বিতীয়বার চালালে ইতিমধ্যে identical file skip করে। ভিন্ন নামে থাকা আপনার existing workflow-ও inspect করুন, নাহলে একই push-এ দুটি CI চলতে পারে।
+
+Installer নিজে secret তৈরি করে না, `git commit/push` করে না এবং release চালু করে না। Install-এর পর `.github/workflows/` review করে commit/push করুন। **AAB/Publish-এর আগে** [Android signing config ও চারটি keystore secret](docs/ANDROID_SIGNING.md) তৈরি করুন, `pubspec.yaml`-এ `version: name+code` ঠিক করুন, আর test AdMob ID / `com.example` placeholder বদলান। `android/` না থাকলে Android build-এর আগে Flutter-এ Android platform যোগ করতে হবে। Publish path-এর placeholder ও version-bump checks default-on; test ID থাকলে ইচ্ছাকৃতভাবে release fail করবে।
+
+Remote shell script চালানোর আগে review করতে চাইলে [scripts/install.sh](scripts/install.sh) পড়ুন বা versioned URL থেকে download করে দেখে তারপর `bash install.sh` চালান। Script শুধুই caller YAML লেখে; app code বা keystore touch করে না।
+
+## ম্যানুয়াল setup (installer ব্যবহার না করলে)
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন (`v1.4.0` = wrapper `publish-release.yml` + `flutter-build.yml` দুটোই নিয়েছে):
+App project-এর caller workflow-তে tested tag pin করুন (`v1.5.0` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
 ```
 
-Release publish করার জন্য `publish-release.yml@v1.4.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
+Release publish করার জন্য `publish-release.yml@v1.5.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
 Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
@@ -108,7 +140,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -200,7 +232,7 @@ Gradle/`AndroidManifest.xml`-এর placeholder-এর মতো যে মা�
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
     with:
       app-name: QuizBaaz
       dart-defines: |
@@ -233,7 +265,7 @@ v1.4.0-এ builder-টা শুধু build করেই থেমে থাক
 ```yaml
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
     with:
       working-directory: flutter_app
       code-coverage: true
@@ -246,7 +278,7 @@ jobs:
 
 | Input | Default | কী করে |
 |---|---|---|
-| `fail-on-placeholders` | `false` (wrapper-এ `true`) | Google test ad ID, `com.example.*`, debug signing থাকলে fail |
+| `fail-on-placeholders` | `false` (wrapper-এ `true`) | Google test ad ID / `com.example.*` থাকলে fail; debug-signing fallback-এ warning |
 | `check-version-bump` | `false` (wrapper-এ `true`) | `pubspec.yaml` শেষ release tag-এর চেয়ে নতুন না হলে fail |
 | `obfuscate` | `false` | `--obfuscate --split-debug-info` দিয়ে build |
 | `upload-symbols` | `true` | obfuscation symbol গুলো artifact হিসেবে রাখে (crash de-obfuscate করার জন্য দরকার) |
@@ -391,7 +423,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -421,8 +453,8 @@ run-tests: false
 Central workflow-তে পরীক্ষিত পরিবর্তনের পর নতুন tag দিন, যেমন:
 
 ```bash
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে নিজের ট্যাগেই পিন করে, তাই নতুন ট্যাগ দেওয়ার সময় wrapper-এর ভেতরের pin-টাও একই ট্যাগে বাড়াতে হবে — নাহলে পুরোনো builder চালু থাকবে।
@@ -430,7 +462,7 @@ wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে ন�
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
 ```
 
 ## প্রয়োজনীয় GitHub Secrets

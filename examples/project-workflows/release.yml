@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release-aab:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
     with:
       flutter-channel: stable
       build-apk: false

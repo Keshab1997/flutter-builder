@@ -13,7 +13,7 @@ name: Reusable Publish Android Release
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.4.0
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
 #       with:
 #         app-name: SpeakEasy
 #       secrets: inherit
@@ -217,7 +217,7 @@ on:
 jobs:
   publish:
     name: Publish Android Release
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.4.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
