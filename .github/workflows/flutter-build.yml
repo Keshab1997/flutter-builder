@@ -395,13 +395,15 @@ jobs:
             pct="n/a"
           fi
           echo "Coverage: $hit / $total lines ($pct)"
-          {
-            echo "### Test coverage"
-            echo ""
-            echo "| Lines covered | Coverage |"
-            echo "|---|---|"
-            echo "| $hit / $total | **$pct** |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "### Test coverage"
+              echo ""
+              echo "| Lines covered | Coverage |"
+              echo "|---|---|"
+              echo "| $hit / $total | **$pct** |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload coverage to Codecov
         if: inputs.code-coverage && inputs.upload-coverage-codecov && inputs.run-tests
@@ -463,34 +465,54 @@ jobs:
         if: inputs.fail-on-placeholders
         run: |
           failed=0
+          hits_file=/tmp/placeholder-hits.txt
+
+          # grep exits 2 when a path does not exist even if it matched
+          # elsewhere, so the exit status cannot be trusted here. Collect the
+          # hits in a file and test that instead, and skip missing paths.
+          check() {
+            message="$1"
+            pattern="$2"
+            shift 2
+            : > "$hits_file"
+            for path in "$@"; do
+              [ -e "$path" ] || continue
+              grep -rniE "$pattern" "$path" >> "$hits_file" 2>/dev/null || true
+            done
+            if [ -s "$hits_file" ]; then
+              echo "::error::$message"
+              cat "$hits_file"
+              failed=1
+            else
+              echo "OK: $message"
+            fi
+          }
+
           # Google's public test ad unit IDs must never reach a release build.
-          if grep -rniE 'ca-app-pub-3940256099942544' lib pubspec.yaml 2>/dev/null; then
-            echo "::error::A Google test ad unit ID (ca-app-pub-3940256099942544) is still in the source. Replace the AdMob test IDs with the real ones."
-            failed=1
-          else
-            echo "No Google test ad unit IDs found."
-          fi
+          check "A Google test ad unit ID (ca-app-pub-3940256099942544) is still in the source. Replace the AdMob test IDs with the real ones." \
+            'ca-app-pub-3940256099942544' lib pubspec.yaml
+
           # Placeholder application ids left over from 'flutter create'.
-          if grep -rniE 'com\.example\.' lib android/app/src android/app/build.gradle android/app/build.gradle.kts android/app/src/main/AndroidManifest.xml 2>/dev/null; then
-            echo "::error::A placeholder application id (com.example.*) is still configured."
-            failed=1
-          else
-            echo "No placeholder application ids found."
-          fi
+          check "A placeholder application id (com.example.*) is still configured." \
+            'com\.example\.' lib android/app/src android/app/build.gradle android/app/build.gradle.kts android/app/src/main/AndroidManifest.xml
+
           # A release signed with the debug key is installable but not publishable.
-          if grep -rniE 'signingConfig[[:space:]]*=[\. ]*signingConfigs\.getByName\("debug"\)' android/app/build.gradle android/app/build.gradle.kts 2>/dev/null; then
+          : > "$hits_file"
+          for path in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -e "$path" ] || continue
+            grep -rniE 'signingConfig[[:space:]]*=[[:space:]]*signingConfigs\.getByName\("debug"\)' "$path" >> "$hits_file" 2>/dev/null || true
+          done
+          if [ -s "$hits_file" ]; then
             echo "::warning::The release build type can fall back to the debug signing key. Make sure a real upload key is configured before publishing."
+            cat "$hits_file"
           fi
+
           if [ "$failed" -ne 0 ]; then
             echo "Placeholder check failed. Set fail-on-placeholders: false to override."
             exit 1
           fi
           echo "No release placeholders found."
 
-      # Signing is mandatory for an AAB or a GitHub Release. For an APK-only build
-      # it is applied whenever the keystore secret is present, so projects whose
-      # Gradle refuses to build a release without key.properties still work and
-      # the test APK carries the same upload-key signature as the Play build.
       - name: Verify Android signing secrets
         if: inputs.build-aab || inputs.publish-github-release || env.HAS_ANDROID_KEYSTORE != ''
         env:
@@ -1167,32 +1189,34 @@ jobs:
       - name: Build summary
         if: always()
         run: |
-          {
-            echo "## Flutter build summary"
-            echo
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Workflow | ${{ github.workflow }} |"
-            echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Job status | **${{ job.status }}** |"
-            if [ -f coverage/lcov.info ]; then
-              total="$(grep -c '^DA:' coverage/lcov.info || true)"
-              hit="$(grep '^DA:' coverage/lcov.info | awk -F, '$2 > 0 {n++} END {print n + 0}' || true)"
-              if [ "${total:-0}" -gt 0 ]; then
-                pct="$(awk -v h="$hit" -v t="$total" 'BEGIN {printf "%.1f", h * 100 / t}')%"
-              else
-                pct="n/a"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "## Flutter build summary"
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Workflow | ${{ github.workflow }} |"
+              echo "| Commit | \`${{ github.sha }}\` |"
+              echo "| Job status | **${{ job.status }}** |"
+              if [ -f coverage/lcov.info ]; then
+                total="$(grep -c '^DA:' coverage/lcov.info || true)"
+                hit="$(grep '^DA:' coverage/lcov.info | awk -F, '$2 > 0 {n++} END {print n + 0}' || true)"
+                if [ "${total:-0}" -gt 0 ]; then
+                  pct="$(awk -v h="$hit" -v t="$total" 'BEGIN {printf "%.1f", h * 100 / t}')%"
+                else
+                  pct="n/a"
+                fi
+                echo "| Coverage | $hit / $total lines ($pct) |"
               fi
-              echo "| Coverage | $hit / $total lines ($pct) |"
-            fi
-            while IFS= read -r f; do
-              [ -n "$f" ] || continue
-              bytes="$(stat -c%s "$f")"
-              mb="$(awk -v b="$bytes" 'BEGIN {printf "%.2f", b / 1048576}')"
-              echo "| \`$(basename "$f")\` | $mb MB |"
-            done < <(find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null | sort)
-            echo
-          } >> "$GITHUB_STEP_SUMMARY"
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                bytes="$(stat -c%s "$f")"
+                mb="$(awk -v b="$bytes" 'BEGIN {printf "%.2f", b / 1048576}')"
+                echo "| \`$(basename "$f")\` | $mb MB |"
+              done < <(find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null | sort)
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Comment the summary on the pull request
         if: always() && inputs.pr-comment && github.event_name == 'pull_request'
