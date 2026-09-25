@@ -106,6 +106,19 @@ on:
         required: false
         type: string
         default: ""
+      google-services-json-base64:
+        description: >-
+          Base64 google-services.json written to <working-directory>/android/app
+          before the build. Pass it from a repository secret so the Firebase
+          client config never has to live in git. Empty is a no-op.
+        required: false
+        type: string
+        default: ""
+      google-services-plist-base64:
+        description: "iOS equivalent of google-services-json-base64 (GoogleService-Info.plist). Empty is a no-op."
+        required: false
+        type: string
+        default: ""
       fail-on-placeholders:
         description: "Fail the release when Google test ad unit IDs, com.example ids or debug signing are still in the source (on by default here)"
         required: false
@@ -236,6 +249,8 @@ jobs:
       release-prerelease: ${{ inputs.release-prerelease }}
       dart-defines: ${{ inputs.dart-defines }}
       build-env: ${{ inputs.build-env }}
+      google-services-json-base64: ${{ inputs.google-services-json-base64 }}
+      google-services-plist-base64: ${{ inputs.google-services-plist-base64 }}
       # Release safety nets. On by default for the release path: a release is
       # exactly the build you do not want to ship with test ad units or an
       # unchanged versionCode.

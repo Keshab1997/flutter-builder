@@ -248,6 +248,28 @@ jobs:
 
 `ANDROID_KEYSTORE_BASE64` secret থাকলে APK-only build-ও এখন upload key দিয়ে sign হয় (আগে শুধু AAB/Release-এ হত) — যে project-এর Gradle `key.properties` ছাড়া release build-ই করতে দেয় না, তার APK build এতে আর fail করে না।
 
+## Firebase config file git-এ না রেখে build করা (v1.5.1+)
+
+`google-services.json` / `GoogleService-Info.plist`-এর মান নিজে থেকে secret নয়, তবুও git-এ থাকলে যে কেউ সেই config দিয়ে নিজের build আপনার Firebase project-এর দিকে তাক করে Firestore/Auth-এ load দিতে পারে। তাই ফাইল দুটো base64 করে secret-এ রাখুন; build-এর আগে workflow সেগুলো লিখে দেবে।
+
+```bash
+base64 -w0 android/app/google-services.json | gh secret set GOOGLE_SERVICES_JSON_BASE64
+base64 -w0 ios/Runner/GoogleService-Info.plist  | gh secret set GOOGLE_SERVICES_PLIST_BASE64
+```
+
+```yaml
+    with:
+      google-services-json-base64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      google-services-plist-base64: ${{ secrets.GOOGLE_SERVICES_PLIST_BASE64 }}   # iOS, optional
+```
+
+| Input | লেখা হয় |
+|---|---|
+| `google-services-json-base64` | `<working-directory>/android/app/google-services.json` |
+| `google-services-plist-base64` | `<working-directory>/ios/Runner/GoogleService-Info.plist` |
+
+দুটো input-ই optional — খালি থাকলে step-টি skip হয় এবং checkout-এর ফাইল অপরিবর্তিত থাকে, তাই ফাইলটি এখনো git-এ track করা project-ও আগের মতো চলবে। Step-টি checkout-এর ঠিক পরে চলে, ফলে Gradle-এর `if (file("google-services.json").exists())` guard ঠিকমতো কাজ করে। Decode-এর পর JSON/plist validate করা হয়, তাই ভুল base64 দিলে build পরে না শেষে fail হবে — শুরুতেই ধরা পড়বে।
+
 ## v1.4.0 — smart features
 
 v1.4.0-এ builder-টা শুধু build করেই থেমে থাকে না, release-এর আগে ঝুঁকি ধরতে পারে। সব input backward compatible — কিছু না দিলে পুরোনো আচরণই থাকে।

@@ -68,6 +68,26 @@ on:
         required: false
         type: string
         default: ""
+      google-services-json-base64:
+        description: >-
+          Base64-encoded google-services.json, written to
+          <working-directory>/android/app/google-services.json before the build.
+          Pass it from a repository secret (for example
+          ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}) so the Firebase client
+          config never has to live in git. Empty input leaves the checkout as-is,
+          so projects that still track the file keep working.
+        required: false
+        type: string
+        default: ""
+      google-services-plist-base64:
+        description: >-
+          Base64-encoded GoogleService-Info.plist, written to
+          <working-directory>/ios/Runner/GoogleService-Info.plist before the
+          build. iOS equivalent of google-services-json-base64; empty input is a
+          no-op.
+        required: false
+        type: string
+        default: ""
       artifact-retention-days:
         description: Number of days to keep build artifacts
         required: false
@@ -258,6 +278,32 @@ jobs:
         with:
           # Full history is required to compare against the previous release tag.
           fetch-depth: 0
+
+      # Firebase client configuration (google-services.json / GoogleService-Info.plist)
+      # is not secret in itself, but keeping it out of git stops strangers from
+      # pointing their own builds at your Firebase project. Projects that still
+      # track the file are unaffected: both inputs default to empty and are then
+      # a no-op.
+      - name: Write Firebase configuration files
+        if: ${{ inputs.google-services-json-base64 != '' || inputs.google-services-plist-base64 != '' }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ inputs.google-services-json-base64 }}
+          GOOGLE_SERVICES_PLIST_BASE64: ${{ inputs.google-services-plist-base64 }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${GOOGLE_SERVICES_JSON_BASE64}" ]; then
+            mkdir -p android/app
+            printf '%s' "${GOOGLE_SERVICES_JSON_BASE64}" | base64 --decode > android/app/google-services.json
+            python3 -c "import json; json.load(open('android/app/google-services.json')); print('OK: android/app/google-services.json is valid JSON')"
+          fi
+
+          if [ -n "${GOOGLE_SERVICES_PLIST_BASE64}" ]; then
+            mkdir -p ios/Runner
+            printf '%s' "${GOOGLE_SERVICES_PLIST_BASE64}" | base64 --decode > ios/Runner/GoogleService-Info.plist
+            python3 -c "import plistlib; plistlib.load(open('ios/Runner/GoogleService-Info.plist','rb')); print('OK: ios/Runner/GoogleService-Info.plist is valid')"
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v5
