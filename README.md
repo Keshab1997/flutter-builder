@@ -524,6 +524,17 @@ FIREBASE_SERVICE_CREDENTIALS   Firebase App Distribution upload
 
 বিস্তারিত: [docs/ANDROID_SIGNING.md](docs/ANDROID_SIGNING.md)
 
+### Agent দিয়ে secret সেট করান
+
+হাতে না করে AI agent দিয়ে করাতে চাইলে [docs/AGENT_SECRETS_SETUP.md](docs/AGENT_SECRETS_SETUP.md)
+টি agent-কে দিন — সে local file (`google-services.json`, keystore, `key.properties`)
+খুঁজে নিয়ে base64 encode করে GitHub Actions-এ বসিয়ে দেবে, কোনো value chat-এ না
+দেখিয়ে। দুটো জিনিসই সেখানে guard করা আছে:
+
+- `base64 -w0` macOS-এ fail করে — ফলে **empty secret** সেট হয়। স্ক্রিপ্ট
+  `openssl base64 -A` ব্যবহার করে (macOS + Linux দুটোতেই চলে)।
+- 40 character-এর ছোট কোনো value সেট করতেই দেবে না।
+
 ## GitHub permissions
 
 সাধারণ CI/manual artifact build-এর জন্য:
