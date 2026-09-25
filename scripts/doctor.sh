@@ -17,8 +17,26 @@
 set -uo pipefail
 # deliberately no `set -e`: we want every check to run and collect all problems.
 
+# --------------------------------------------------------------------------- #
+# arguments
+# --------------------------------------------------------------------------- #
+#   --ci              running inside GitHub Actions. Local-only concerns
+#                     (missing key.properties, no gh binary) are downgraded to
+#                     info, because the workflow supplies those from secrets.
+#   --repo OWNER/NAME skip the gh repo lookup
+# --------------------------------------------------------------------------- #
 REPO_OVERRIDE=""
-if [ "${1:-}" = "--repo" ]; then REPO_OVERRIDE="${2:-}"; fi
+CI_MODE=0
+[ -n "${DOCTOR_CI:-}" ] && CI_MODE=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ci)            CI_MODE=1; shift ;;
+    --repo)          REPO_OVERRIDE="${2:-}"; shift 2 ;;
+    --repo=*)        REPO_OVERRIDE="${1#*=}"; shift ;;
+    -h|--help)       sed -n '2,22p' "$0"; exit 0 ;;
+    *)               shift ;;
+  esac
+done
 
 # --------------------------------------------------------------------------- #
 # output helpers
@@ -38,6 +56,9 @@ fail() { printf '%s  FAIL%s  %s\n'  "$C_RED" "$C_OFF" "$*"; FAIL=$((FAIL+1)); FA
 warn() { printf '%s  WARN%s  %s\n'  "$C_YEL" "$C_OFF" "$*"; WARN=$((WARN+1)); }
 info() { printf '%s  ..  %s%s\n'    "$C_DIM" "$*" "$C_OFF"; }
 head_() { printf '\n%s%s%s\n' "$C_BLD" "$*" "$C_OFF"; }
+# Things that matter locally but not in CI (the workflow supplies them from
+# secrets): report them, but do not count them as warnings inside a build.
+soft() { if [ "$CI_MODE" = 1 ]; then info "$*"; else warn "$*"; fi; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -57,10 +78,13 @@ done
 if have gh; then
   pass "gh available"
   if gh auth status >/dev/null 2>&1; then pass "gh authenticated"
-  else fail "gh is installed but not authenticated — run: gh auth login"; fi
+  else
+    if [ "$CI_MODE" = 1 ]; then info "gh not authenticated (normal on a runner)"
+    else fail "gh is installed but not authenticated — run: gh auth login"; fi
+  fi
 else
-  warn "gh not installed — GitHub secret checks will be skipped"
-  warn "   install: brew install gh   (or https://cli.github.com)"
+  soft "gh not installed — GitHub secret checks will be skipped"
+  soft "   install: brew install gh   (or https://cli.github.com)"
 fi
 
 # --------------------------------------------------------------------------- #
@@ -123,19 +147,24 @@ if [ -n "$KEYPROPS" ]; then
     [ -n "$(prop "$k")" ] && pass "  $k present" || fail "  $k MISSING in key.properties"
   done
   STORE_FILE="$(prop storeFile)"
+  # The keystore path is relative in every convention we support:
+  #   <cwd>/storeFile · android/storeFile (Flutter default) · android/app/storeFile
   case "$STORE_FILE" in
     /*) [ -f "$STORE_FILE" ] && pass "  keystore exists" || fail "  keystore not found: $STORE_FILE" ;;
     "") : ;;
-    *)  if [ -f "$STORE_FILE" ]; then pass "  keystore exists"
-        elif [ -f "${ANDROID_DIR%/app}/$STORE_FILE" ]; then pass "  keystore exists"
-        else fail "  keystore not found: $STORE_FILE" ; fi ;;
+    *)  found=no
+        for cand in "$STORE_FILE" "${ANDROID_DIR%/app}/$STORE_FILE" "$ANDROID_DIR/$STORE_FILE"; do
+          [ -f "$cand" ] && found=yes && break
+        done
+        [ "$found" = yes ] && pass "  keystore exists" \
+                           || fail "  keystore not found: $STORE_FILE (looked in ./, ${ANDROID_DIR%/app}/, $ANDROID_DIR/)" ;;
   esac
   git ls-files --error-unmatch "$KEYPROPS" >/dev/null 2>&1 \
     && fail "  $KEYPROPS IS TRACKED BY GIT — remove it: git rm --cached $KEYPROPS" \
     || pass "  key.properties is not tracked by git"
 else
-  warn "no key.properties — release AAB signing cannot be configured"
-  warn "   see docs/ANDROID_SIGNING.md"
+  soft "no key.properties — release AAB signing cannot be configured"
+  soft "   see docs/ANDROID_SIGNING.md"
 fi
 
 # --------------------------------------------------------------------------- #
@@ -169,8 +198,16 @@ PY
       && fail "  google-services.json IS TRACKED BY GIT — git rm --cached $GS" \
       || pass "  not tracked by git"
   else
-    warn "google-services.json not present locally"
-    warn "   the build can still get it from the GOOGLE_SERVICES_JSON_BASE64 secret"
+    # In CI this is the one place the empty-secret bug becomes visible: if
+    # GOOGLE_SERVICES_JSON_BASE64 was set but empty, the builder silently
+    # skips writing the file and we end up here. Projects that genuinely do
+    # not use Firebase leave DOCTOR_REQUIRE_FIREBASE unset.
+    if [ "$CI_MODE" = 1 ] && [ -n "${DOCTOR_REQUIRE_FIREBASE:-}" ]; then
+      fail "  google-services.json ABSENT after injection — GOOGLE_SERVICES_JSON_BASE64 is empty or invalid. Re-set it: openssl base64 -A -in <file> | gh secret set GOOGLE_SERVICES_JSON_BASE64"
+    else
+      soft "google-services.json not present locally"
+      soft "   the build can still get it from the GOOGLE_SERVICES_JSON_BASE64 secret"
+    fi
   fi
 fi
 
@@ -184,7 +221,10 @@ fi
 # 5. GitHub secrets & variables
 # --------------------------------------------------------------------------- #
 head_ "5. GitHub Actions secrets and variables"
-if have gh && [ -n "$REPO" ] && gh auth status >/dev/null 2>&1; then
+if [ "$CI_MODE" = 1 ]; then
+  info "skipped in CI — a run cannot read its own secrets, and values are never "
+  info "  exposed; this section only makes sense on your machine"
+elif have gh && [ -n "$REPO" ] && gh auth status >/dev/null 2>&1; then
   have_names() {
     if [ "$1" = secret ]; then gh secret list   --repo "$REPO" --json name -q '.[].name' 2>/dev/null
     else                        gh variable list --repo "$REPO" --json name -q '.[].name' 2>/dev/null; fi | sort
@@ -203,7 +243,7 @@ if have gh && [ -n "$REPO" ] && gh auth status >/dev/null 2>&1; then
   info "remember: an EMPTY secret still shows up as present here"
   info "gh cannot read values back — see section 7"
 else
-  warn "skipped (no gh, or not authenticated)"
+  soft "skipped (no gh, or not authenticated)"
 fi
 
 # --------------------------------------------------------------------------- #
@@ -211,7 +251,9 @@ fi
 # --------------------------------------------------------------------------- #
 head_ "6. Workflow wiring"
 WF_DIR=".github/workflows"
-if [ -d "$WF_DIR" ]; then
+if [ "$CI_MODE" = 1 ]; then
+  info "skipped in CI — this is a static check of the workflow files themselves"
+elif [ -d "$WF_DIR" ]; then
   WFS="$(ls "$WF_DIR"/*.yml "$WF_DIR"/*.yaml 2>/dev/null || true)"
   [ -n "$WFS" ] && pass "workflows found" || warn "no workflow files"
 

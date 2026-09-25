@@ -252,6 +252,44 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scr
 > empty সেট করলেও Updated timestamp আজকের হয়। Empty ধরতে হলে একটা real build
 > চালিয়ে log-এ `OK: android/app/google-services.json is valid JSON` খুঁজতে হবে।
 
+### Release-এ doctor স্বয়ংক্রিয়ভাবে (v1.7.0+)
+
+`preflight` input দিলে AAB/APK build-এর **ঠিক আগে** doctor চলে — signing আর
+Firebase config লেখার পরে, তাই সে exactly সেই tree দেখে যা compile হতে যাচ্ছে।
+
+```yaml
+jobs:
+  publish:
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.7.0
+    with:
+      app-name: KeepIt
+      working-directory: flutter_app
+      preflight: true                  # release path-এ default-ই true
+      preflight-require-firebase: true # ← empty Firebase secret এখন FAIL করবে
+    secrets: inherit
+```
+
+| Input | Default (build / release) | কাজ |
+|---|---|---|
+| `preflight` | `false` / **`true`** | doctor চালিয়ে FAIL থাকলে build বন্ধ |
+| `preflight-require-firebase` | `false` / `false` | `google-services.json` অনুপস্থিত থাকলে FAIL |
+
+`preflight-require-firebase: true` মানেই: **`GOOGLE_SERVICES_JSON_BASE64` empty
+হলে আর চুপচাপ offline-only app release হবে না** — build লাল হয়ে বলবে:
+
+```text
+FAIL  google-services.json ABSENT after injection —
+      GOOGLE_SERVICES_JSON_BASE64 is empty or invalid.
+```
+
+যে app-এ Firebase দরকার নেই, সেখানে `preflight-require-firebase` বন্ধ রাখুন
+(তখন file অনুপস্থিত থাকলে শুধু info)। Doctor বন্ধ করতে: `preflight: false`।
+
+> 🔴 v1.7.0-এর আগে `publish-release.yml` ভিতরে `flutter-build.yml@v1.5.0` কল
+> করত — কিন্তু Firebase injection v1.6.0-এ এসেছে। তার মানে **release path-এ
+> `google-services.json` কখনো inject-ই হয়নি**, অথচ manual build-এ হয়েছিল।
+> v1.7.0 সেটা ঠিক করে। তাই `@v1.7.0`-এ upgrade করা জরুরি।
+
 ## Build-time configuration (AdMob ID, API base URL ইত্যাদি)
 
 Release build-এ যে মানগুলো compile-time-এ ঢোকাতে হয় — যেমন আসল AdMob ID — সেগুলো caller workflow-এর `dart-defines` input-এ দিন, প্রতি লাইনে একটি `KEY=VALUE`। প্রতিটি লাইন `flutter build apk/appbundle`-এ `--dart-define=KEY=VALUE` হয়ে যায়; খালি value দিলে সেই key skip হয় এবং app-এর নিজের default (যেমন Google-এর test ad unit) বহাল থাকে।

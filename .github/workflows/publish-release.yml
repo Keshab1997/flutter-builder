@@ -13,7 +13,7 @@ name: Reusable Publish Android Release
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.7.0
 #       with:
 #         app-name: SpeakEasy
 #       secrets: inherit
@@ -106,6 +106,24 @@ on:
         required: false
         type: string
         default: ""
+      preflight:
+        description: >-
+          Run scripts/doctor.sh before the release is built and fail on any
+          problem it reports. On by default for the release path: a release is
+          exactly the build you do not want to ship with a broken Firebase
+          config or a tracked google-services.json. Set false to skip.
+        required: false
+        type: boolean
+        default: true
+      preflight-require-firebase:
+        description: >-
+          With preflight on: fail the release when google-services.json is
+          absent after injection. Enable for apps that need cloud sync — it
+          turns an empty GOOGLE_SERVICES_JSON_BASE64 secret into a loud failure
+          instead of a silently offline-only release.
+        required: false
+        type: boolean
+        default: false
       google-services-json-base64:
         description: >-
           Base64 google-services.json written to <working-directory>/android/app
@@ -236,7 +254,10 @@ on:
 jobs:
   publish:
     name: Publish Android Release
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
+    # MUST stay in step with the tag this file is published under. The
+    # google-services.json injection only exists from v1.6.0 onwards, so an
+    # older ref here silently releases an offline-only app.
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.7.0
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
@@ -257,6 +278,8 @@ jobs:
       build-env: ${{ inputs.build-env }}
       google-services-json-base64: ${{ inputs.google-services-json-base64 }}
       google-services-plist-base64: ${{ inputs.google-services-plist-base64 }}
+      preflight: ${{ inputs.preflight }}
+      preflight-require-firebase: ${{ inputs.preflight-require-firebase }}
       # Release safety nets. On by default for the release path: a release is
       # exactly the build you do not want to ship with test ad units or an
       # unchanged versionCode.

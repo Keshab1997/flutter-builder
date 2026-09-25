@@ -141,6 +141,25 @@ on:
         required: false
         type: boolean
         default: true
+      preflight:
+        description: >-
+          Run scripts/doctor.sh from this builder before the artifact is built,
+          and fail the job on any problem it finds (invalid or missing
+          google-services.json, secrets tracked by git, Google test ad ids
+          under lib/, com.example placeholders). Off by default so ordinary
+          builds are unaffected; publish-release.yml turns it on.
+        required: false
+        type: boolean
+        default: false
+      preflight-require-firebase:
+        description: >-
+          With preflight on: fail the build when google-services.json is absent
+          after injection. Enable this for apps that need cloud sync — it turns
+          an empty GOOGLE_SERVICES_JSON_BASE64 secret (which otherwise silently
+          produces an offline-only app) into a loud failure.
+        required: false
+        type: boolean
+        default: false
       fail-on-placeholders:
         description: Fail when Google test ad unit IDs, com.example ids or debug signing are still in the release
         required: false
@@ -765,6 +784,31 @@ jobs:
             echo "- Dart defines: $(join "${define_keys[@]}")"
             echo "- Build environment: $(join "${env_keys[@]}")"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Runs after signing and Firebase config have been written, so the doctor
+      # sees exactly the tree that is about to be compiled. Pinned to the same
+      # tag as this file — the script and the workflow ship together.
+      - name: Check out this builder (for the pre-flight script)
+        if: inputs.preflight && (inputs.build-apk || inputs.build-aab)
+        uses: actions/checkout@v5
+        with:
+          repository: Keshab1997/flutter-builder
+          ref: v1.7.0
+          path: .flutter-builder
+
+      - name: Pre-flight doctor
+        if: inputs.preflight && (inputs.build-apk || inputs.build-aab)
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          DOCTOR_REQUIRE_FIREBASE: ${{ inputs.preflight-require-firebase && '1' || '' }}
+        run: |
+          set -euo pipefail
+          script="$GITHUB_WORKSPACE/.flutter-builder/scripts/doctor.sh"
+          if [ ! -f "$script" ]; then
+            echo "::warning::pre-flight skipped: $script not found (builder checkout failed)"
+            exit 0
+          fi
+          bash "$script" --ci
 
       - name: Build release APK
         if: inputs.build-apk
