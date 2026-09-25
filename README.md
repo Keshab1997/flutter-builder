@@ -223,6 +223,35 @@ git push origin v1.0.0
 
 এটি GitHub Release publish করে না; full release publishing-এর জন্য আগের `publish-release.yml` ব্যবহার করুন।
 
+## Doctor — সমস্যা কোথায়, doctor বলে দেবে
+
+Release-এর আগে একবার চালিয়ে নিন:
+
+```bash
+bash /path/to/flutter-builder/scripts/doctor.sh
+# অথবা clone ছাড়াই:
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/doctor.sh | bash
+```
+
+**App repository-র root থেকে চালাতে হবে** (flutter-builder থেকে নয়)। এটি চেক করে:
+
+| Section | যা যা দেখে |
+|---|---|
+| Environment | `gh`, `git`, `python3`, `openssl` — আর gh authenticated কিনা |
+| Repository | Android/iOS module খোঁজে, `applicationId` বের করে |
+| Android signing | `key.properties`-এর চারটি key, keystore file আছে কিনা, git-এ tracked কিনা |
+| Firebase config | `google-services.json` valid JSON কিনা, package `applicationId`-এর সাথে মেলে কিনা, git-এ আছে কিনা |
+| GitHub secrets | কোন secret/variable **missing** |
+| Workflow wiring | builder `@v1.6.0+`, `with:`-এর ভিতরে `${{ secrets.* }}` আছে কিনা, Firebase secret forward হচ্ছে কিনা |
+| Source hygiene | `lib/`-এ Google test ad ID, `com.example` placeholder, tracked secret file |
+
+প্রতিটি সমস্যার পাশেই ঠিক কী করতে হবে লেখা থাকে, শেষে **"Fix these first"** তালিকা।
+`0 failures` মানে release-এর জন্য প্রস্তুত; কোনো FAIL থাকলে exit code `1`।
+
+> ⚠️ Doctor **empty secret** ধরতে পারে না — `gh` কখনো value পড়তে পারে না, আর
+> empty সেট করলেও Updated timestamp আজকের হয়। Empty ধরতে হলে একটা real build
+> চালিয়ে log-এ `OK: android/app/google-services.json is valid JSON` খুঁজতে হবে।
+
 ## Build-time configuration (AdMob ID, API base URL ইত্যাদি)
 
 Release build-এ যে মানগুলো compile-time-এ ঢোকাতে হয় — যেমন আসল AdMob ID — সেগুলো caller workflow-এর `dart-defines` input-এ দিন, প্রতি লাইনে একটি `KEY=VALUE`। প্রতিটি লাইন `flutter build apk/appbundle`-এ `--dart-define=KEY=VALUE` হয়ে যায়; খালি value দিলে সেই key skip হয় এবং app-এর নিজের default (যেমন Google-এর test ad unit) বহাল থাকে।
