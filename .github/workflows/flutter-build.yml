@@ -257,6 +257,16 @@ on:
       FIREBASE_SERVICE_CREDENTIALS:
         description: Firebase service account credentials used for App Distribution
         required: false
+      GOOGLE_SERVICES_JSON_BASE64:
+        description: >-
+          Base64 google-services.json written to
+          <working-directory>/android/app before the build. Secret alternative
+          to the google-services-json-base64 input (a `with:` input cannot
+          reference the secrets context).
+        required: false
+      GOOGLE_SERVICES_PLIST_BASE64:
+        description: "iOS equivalent of GOOGLE_SERVICES_JSON_BASE64 (GoogleService-Info.plist)"
+        required: false
 
 jobs:
   validate-and-build:
@@ -285,11 +295,15 @@ jobs:
       # track the file are unaffected: both inputs default to empty and are then
       # a no-op.
       - name: Write Firebase configuration files
-        if: ${{ inputs.google-services-json-base64 != '' || inputs.google-services-plist-base64 != '' }}
         working-directory: ${{ inputs.working-directory }}
         env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ inputs.google-services-json-base64 }}
-          GOOGLE_SERVICES_PLIST_BASE64: ${{ inputs.google-services-plist-base64 }}
+          # Prefer the with: input, fall back to a secret of the same shape.
+          # A `with:` input cannot reference the secrets context, so callers
+          # that keep the file in a secret rely on the second branch (either
+          # `secrets: inherit` or an explicit secrets: mapping). Both empty
+          # means the step is a no-op and the checkout is left untouched.
+          GOOGLE_SERVICES_JSON_BASE64: ${{ inputs.google-services-json-base64 || secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_PLIST_BASE64: ${{ inputs.google-services-plist-base64 || secrets.GOOGLE_SERVICES_PLIST_BASE64 }}
         run: |
           set -euo pipefail
 

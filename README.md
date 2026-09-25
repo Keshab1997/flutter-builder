@@ -257,16 +257,32 @@ base64 -w0 android/app/google-services.json | gh secret set GOOGLE_SERVICES_JSON
 base64 -w0 ios/Runner/GoogleService-Info.plist  | gh secret set GOOGLE_SERVICES_PLIST_BASE64
 ```
 
+**দুটো রাস্তা আছে — যদি secret ব্যবহার করতে চান, দ্বিতীয়টি ব্যবহার করুন:**
+
 ```yaml
+    # ১) Variable / plain value — with: input দিয়ে
     with:
-      google-services-json-base64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-      google-services-plist-base64: ${{ secrets.GOOGLE_SERVICES_PLIST_BASE64 }}   # iOS, optional
+      google-services-json-base64: ${{ vars.GOOGLE_SERVICES_JSON_BASE64 }}
+
+    # ২) Secret — workflow-এর ভেতর থেকে পড়া হয় (secret সরাসরি with:-এ দেওয়া যায় না)
+    secrets: inherit          # অথবা নিচের মতো explicit mapping
 ```
 
-| Input | লেখা হয় |
+```yaml
+    secrets:
+      GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      GOOGLE_SERVICES_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICES_PLIST_BASE64 }}
+```
+
+> ⚠️ **GitHub Actions-এ `with:` input-এ `secrets` context পাওয়া যায় না।**
+> `with: google-services-json-base64: ${{ secrets.X }}` লিখলে workflow টি কোনো job ছাড়াই
+> fail হবে। Secret হলে `secrets:`/`secrets: inherit` ব্যবহার করুন, অথবা মানটি
+> repository **Variable**-এ রাখুন।
+
+| Input / secret | লেখা হয় |
 |---|---|
-| `google-services-json-base64` | `<working-directory>/android/app/google-services.json` |
-| `google-services-plist-base64` | `<working-directory>/ios/Runner/GoogleService-Info.plist` |
+| `google-services-json-base64` / `GOOGLE_SERVICES_JSON_BASE64` | `<working-directory>/android/app/google-services.json` |
+| `google-services-plist-base64` / `GOOGLE_SERVICES_PLIST_BASE64` | `<working-directory>/ios/Runner/GoogleService-Info.plist` |
 
 দুটো input-ই optional — খালি থাকলে step-টি skip হয় এবং checkout-এর ফাইল অপরিবর্তিত থাকে, তাই ফাইলটি এখনো git-এ track করা project-ও আগের মতো চলবে। Step-টি checkout-এর ঠিক পরে চলে, ফলে Gradle-এর `if (file("google-services.json").exists())` guard ঠিকমতো কাজ করে। Decode-এর পর JSON/plist validate করা হয়, তাই ভুল base64 দিলে build পরে না শেষে fail হবে — শুরুতেই ধরা পড়বে।
 

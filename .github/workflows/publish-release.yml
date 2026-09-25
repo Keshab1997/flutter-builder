@@ -226,6 +226,12 @@ on:
       FIREBASE_SERVICE_CREDENTIALS:
         description: Firebase service account credentials used for App Distribution
         required: false
+      GOOGLE_SERVICES_JSON_BASE64:
+        description: "Base64 google-services.json written before the build. Secret alternative to the google-services-json-base64 input."
+        required: false
+      GOOGLE_SERVICES_PLIST_BASE64:
+        description: "iOS equivalent of GOOGLE_SERVICES_JSON_BASE64 (GoogleService-Info.plist)"
+        required: false
 
 jobs:
   publish:
@@ -279,3 +285,5 @@ jobs:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
       FIREBASE_SERVICE_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS }}
+      GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      GOOGLE_SERVICES_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICES_PLIST_BASE64 }}
