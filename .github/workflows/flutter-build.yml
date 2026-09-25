@@ -72,10 +72,10 @@ on:
         description: >-
           Base64-encoded google-services.json, written to
           <working-directory>/android/app/google-services.json before the build.
-          Pass it from a repository secret (for example
-          ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}) so the Firebase client
-          config never has to live in git. Empty input leaves the checkout as-is,
-          so projects that still track the file keep working.
+          Pass it from a repository secret (for example a secret named
+          GOOGLE_SERVICES_JSON_BASE64) so the Firebase client config never has
+          to live in git. Empty input leaves the checkout as-is, so projects
+          that still track the file keep working.
         required: false
         type: string
         default: ""
