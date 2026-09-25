@@ -206,7 +206,78 @@ the script and check it printed `OK … (3468 chars)`, not `SKIP` or `FAIL`.
 
 ---
 
-## 6. When something is missing
+## 6. Detecting a missing key
+
+There are **two** kinds of "missing", and only the first is visible locally.
+
+| Kind | Detectable locally? | How |
+|---|---|---|
+| **Absent** — the name was never set | ✅ yes | the presence check below |
+| **Empty** — set, but to nothing | ❌ **no** | only the build log (§5) |
+
+> ⚠️ An empty secret still looks perfect locally: `gh secret list` shows the
+> name, and the *Updated* timestamp is today — because writing an empty value
+> **is** a write. Timestamps prove it was touched, never that it has content.
+
+### 6a. Presence check
+
+```bash
+#!/usr/bin/env bash
+# Lists which secrets/variables are absent. Cannot detect empty ones — use §5.
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+
+have() {  # have secret|variable
+  if [ "$1" = secret ]; then
+    gh secret list   --repo "$REPO" --json name -q '.[].name'
+  else
+    gh variable list --repo "$REPO" --json name -q '.[].name'
+  fi | sort
+}
+want() { printf '%s\n' "$@" | sort; }
+
+report() { # report "LABEL" kind name...
+  local label="$1" kind="$2"; shift 2
+  local out
+  out="$(comm -23 <(want "$@") <(have "$kind"))"
+  if [ -z "$out" ]; then echo "OK     every $label is present"
+  else echo "$out" | sed "s/^/MISSING  $label:  /"; fi
+}
+
+report secret   secret   ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS \
+                         KEY_PASSWORD GOOGLE_SERVICES_JSON_BASE64
+report variable variable ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_INTERSTITIAL_ID \
+                         ADMOB_REWARDED_ID
+
+echo "--- last written (proves touched, not non-empty) ---"
+gh secret list --repo "$REPO" --json name,updatedAt \
+   -q '.[] | "\(.updatedAt)  \(.name)"' | sort
+```
+
+### 6b. What the build does about it
+
+| Missing | Build result | Signal |
+|---|---|---|
+| `ANDROID_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` | ❌ **fails** on an AAB/release build | `Missing secret: KEY_ALIAS` and exit 1 — the builder checks these explicitly |
+| `GOOGLE_SERVICES_JSON_BASE64` | ✅ succeeds | 🔴 **nothing in the log.** App just has no cloud sync |
+| `GOOGLE_SERVICES_PLIST_BASE64` | ✅ succeeds | silent (iOS only) |
+| any `ADMOB_*` | ✅ succeeds | `::notice::build-env: ADMOB_APP_ID is empty and was skipped` |
+| `ADMOB_ENABLED` not `true` | ✅ succeeds | silent — app is ad-free by design |
+
+So the **only** silent-danger rows are the Firebase configs. That is exactly
+why §5 ends with a real workflow run: grep the log for
+`OK: android/app/google-services.json is valid JSON`. No line, no Firebase.
+
+### 6c. What the user sees in the app
+
+| Missing | Symptom in the shipped app |
+|---|---|
+| `GOOGLE_SERVICES_JSON_BASE64` | App works fully offline; Profile shows *"Cloud sync not configured"* instead of the sign-in button |
+| AdMob variables | No ads anywhere, no error |
+| Keystore | Cannot build a release AAB at all |
+
+---
+
+## 7. When something is missing
 
 | Missing | What to tell the human |
 |---|---|
@@ -219,7 +290,7 @@ Do not continue with a guessed value. List it under "Still needed".
 
 ---
 
-## 7. Hardening that no secret can do for you
+## 8. Hardening that no secret can do for you
 
 Setting secrets does not close the two real holes:
 
