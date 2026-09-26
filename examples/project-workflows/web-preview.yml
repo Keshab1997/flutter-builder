@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   preview:
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.1
     with:
       # working-directory: apps/mobile   # if the app lives in a subfolder
       comment-on-pr: true

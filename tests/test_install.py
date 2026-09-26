@@ -68,14 +68,14 @@ class InstallerTests(unittest.TestCase):
         self.assert_success(first)
         before = {name: self.installed(name) for name in FILES}
         for content in before.values():
-            self.assertIn("@v1.8.0", content)
+            self.assertIn("@v1.8.1", content)
             self.assertIn('working-directory: "."', content)
         self.assertIn("code-coverage: true", before["ci.yml"])
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
-        self.assertIn("publish-release.yml@v1.8.0", before["publish-release.yml"])
+        self.assertIn("publish-release.yml@v1.8.1", before["publish-release.yml"])
         self.assertIn('tags:\n      - "v*"', before["release.yml"])
-        self.assertIn("web-preview.yml@v1.8.0", before["web-preview.yml"])
+        self.assertIn("web-preview.yml@v1.8.1", before["web-preview.yml"])
         self.assertIn("secrets: inherit", before["web-preview.yml"])
         self.assertIn('group: web-preview-${{ github.ref }}', before["web-preview.yml"])
 
@@ -154,7 +154,7 @@ class InstallerTests(unittest.TestCase):
         target.write_text("# Custom CI, keep it\n", encoding="utf-8")
         result = self.run_installer("--force")
         self.assert_success(result)
-        self.assertIn("@v1.8.0", self.installed("ci.yml"))
+        self.assertIn("@v1.8.1", self.installed("ci.yml"))
         backups = list((self.repo / ".github/flutter-builder-backups").glob("*/ci.yml"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(), "# Custom CI, keep it\n")
