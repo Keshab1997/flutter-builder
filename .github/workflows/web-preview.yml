@@ -1,0 +1,187 @@
+name: Reusable Web Preview
+
+# Builds the caller's Flutter app for the web and deploys it to GitHub Pages
+# under a per-branch path, so a push gives you a clickable browser URL instead
+# of an APK download. Meant for quick manual testing on a phone/laptop without
+# installing anything: open the URL, log in to the app, poke around.
+#
+# This is a *build preview*, not a debugging session: there is no hot reload
+# here. For hot reload in the browser while developing, run locally:
+#
+#   flutter run -d chrome
+#
+# One-time setup in the caller repository:
+#   Settings -> Pages -> Build and deployment -> Deploy from a branch ->
+#   select the gh-pages branch (root). The first preview push creates it.
+#
+# Notes:
+# - The caller MUST pass `secrets: inherit` (the deploy uses GITHUB_TOKEN).
+# - Plugins without a web implementation (camera, bluetooth, ...) will not
+#   work here; the preview is only as good as the app's web support.
+# - Each branch gets its own directory (preview/<branch>), so several previews
+#   can coexist. Old hashed assets linger in that directory between pushes;
+#   harmless, but if that bothers you, delete the directory on gh-pages.
+# - The release web deploy in flutter-build.yml (deploy-web-pages) publishes
+#   to the Pages root and wipes other files. If a caller uses both, a release
+#   web deploy removes preview/<branch> directories until the next push
+#   recreates them.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Flutter project directory inside the caller repository
+        required: false
+        type: string
+        default: "."
+      flutter-channel:
+        description: Flutter channel (stable, beta, or master)
+        required: false
+        type: string
+        default: stable
+      destination-dir:
+        description: Directory on the gh-pages branch (empty = preview/<branch>)
+        required: false
+        type: string
+        default: ""
+      base-href:
+        description: Base href baked into the build (empty = auto from destination-dir)
+        required: false
+        type: string
+        default: ""
+      comment-on-pr:
+        description: Post or update a PR comment containing the preview URL
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      preview-url:
+        description: Browser URL of the deployed preview
+        value: ${{ jobs.preview.outputs.preview-url }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      preview-url: ${{ steps.paths.outputs.url }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout caller project
+        uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Verify web platform exists
+        run: |
+          if [ ! -d web ]; then
+            echo "::error::No web/ directory found in: $PWD"
+            echo "Add the web platform once with: flutter create --platforms web ."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Compute preview path and URL
+        id: paths
+        env:
+          REF_NAME: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          DESTINATION_DIR: ${{ inputs.destination-dir }}
+          BASE_HREF: ${{ inputs.base-href }}
+        run: |
+          set -euo pipefail
+
+          repo="${GITHUB_REPOSITORY#*/}"
+
+          # Branch names can contain characters that do not belong in a URL
+          # path (and pull/<n>/merge refs appear in some events); sanitize to
+          # [a-z0-9-].
+          safe="$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
+          [ -n "$safe" ] || safe="branch"
+
+          dest_dir="${DESTINATION_DIR:-preview/${safe}}"
+          base_href="${BASE_HREF:-/${repo}/${dest_dir}/}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          url="https://${owner}.github.io/${repo}/${dest_dir}/"
+
+          {
+            echo "dest-dir=${dest_dir}"
+            echo "base-href=${base_href}"
+            echo "url=${url}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Preview: ${url}"
+
+      - name: Build web bundle
+        run: flutter build web --release --base-href "${{ steps.paths.outputs.base-href }}"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ inputs.working-directory }}/build/web
+          destination_dir: ${{ steps.paths.outputs.dest-dir }}
+          # Keep other branches' previews alive next to this one.
+          keep_files: true
+
+      - name: Add preview URL to the step summary
+        run: |
+          {
+            echo "## Web preview"
+            echo ""
+            echo "Open in a browser: ${{ steps.paths.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview URL on the pull request
+        if: inputs.comment-on-pr && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.paths.outputs.url }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const marker = "<!-- flutter-builder:web-preview -->";
+            const url = process.env.PREVIEW_URL;
+            const sha = process.env.COMMIT_SHA;
+            const body = [
+              marker,
+              "### Web preview",
+              "",
+              `${url}`,
+              "",
+              `Built from ${sha.slice(0, 8)}.`
+            ].join("\n");
+
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number,
+            });
+            const existing = comments.find((c) => (c.body || "").includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number,
+                body,
+              });
+            }
