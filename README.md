@@ -35,15 +35,15 @@ my-second-app (আলাদা repository)
 └── Flutter source + একই caller workflow
 ```
 
-## এক কমান্ডে setup (v1.8.0)
+## এক কমান্ডে setup (v1.8.1)
 
 GitHub-এ host করা Flutter project-এর directory থেকে **Linux / macOS / Windows Git Bash**-এ চালান (Bash ও curl লাগে; Flutter SDK installer-এর জন্য লাগে না):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.0/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash
 ```
 
-Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ পাঁচটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.8.0`** tag-এ reusable builder pin করে:
+Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ পাঁচটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.8.1`** tag-এ reusable builder pin করে:
 
 | ফাইল | কখন চলে |
 |---|---|
@@ -56,7 +56,7 @@ Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে ন
 **Monorepo-তে একাধিক Flutter app থাকলে** ইচ্ছামতো একটি বেছে দিন (path repo root থেকে):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 একাধিক app পেলে script আন্দাজ করে ভুলটা বেছে নেবে না; `--app-dir` চাইবে। `--app-name` না দিলে release title-এ `pubspec.yaml`-এর নাম ব্যবহার হয়। `--ref v1.4.0` দিয়ে পুরোনো tested version pin করা যায়; সাধারণত default tag-ই রাখুন। আগে কী লিখবে দেখতে `--dry-run` দিন।
@@ -71,13 +71,13 @@ Remote shell script চালানোর আগে review করতে চা�
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন (`v1.8.0` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
+App project-এর caller workflow-তে tested tag pin করুন (`v1.8.1` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
 ```
 
-Release publish করার জন্য `publish-release.yml@v1.8.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
+Release publish করার জন্য `publish-release.yml@v1.8.1` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
 Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
@@ -141,7 +141,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -261,7 +261,7 @@ Firebase config লেখার পরে, তাই সে exactly সেই tr
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
     with:
       app-name: KeepIt
       working-directory: flutter_app
@@ -324,7 +324,7 @@ Gradle/`AndroidManifest.xml`-এর placeholder-এর মতো যে মা�
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
     with:
       app-name: QuizBaaz
       dart-defines: |
@@ -395,7 +395,7 @@ v1.4.0-এ builder-টা শুধু build করেই থেমে থাক
 ```yaml
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
     with:
       working-directory: flutter_app
       code-coverage: true
@@ -553,7 +553,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -592,7 +592,7 @@ wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে ন�
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
 ```
 
 ## প্রয়োজনীয় GitHub Secrets
