@@ -12,14 +12,15 @@
 - Release hardening: obfuscation, symbol upload, per-ABI APK, size limit
 - Safety net: test ad ID / `com.example` detection, versionCode bump check, `apksigner` verification
 - Web build + GitHub Pages deploy
+- Web preview: প্রতিটি push/PR-এ branch-অনুযায়ী GitHub Pages URL — APK install না করেই browser-এ app test
 - `build_runner` / `gen-l10n` code generation, `.fvmrc` pinning, extra Flutter channel matrix
 - Play Store track upload + Firebase App Distribution
 - সুন্দর structured English release notes তৈরি
-- Version tag ও GitHub Release স্বয়ংক্রিয়ভাবে publish
+- Version tag ও GitHub Release স্বয়ংক্রিয়ভাবে publish
 - Versioned APK/AAB এবং `SHA256SUMS.txt` release-এ upload
 - Flutter ও Gradle cache
 
-> এই repository-তে Flutter SDK, Android SDK, keystore অথবা password রাখা হয় না। GitHub Actions প্রয়োজনের সময় SDK setup করে।
+> এই repository-তে Flutter SDK, Android SDK, keystore অথবা password রাখা হয় না। GitHub Actions প্রয়োজনের সময় SDK setup করে।
 
 ## Repository design
 
@@ -34,15 +35,15 @@ my-second-app (আলাদা repository)
 └── Flutter source + একই caller workflow
 ```
 
-## এক কমান্ডে setup (v1.5.0)
+## এক কমান্ডে setup (v1.8.0)
 
 GitHub-এ host করা Flutter project-এর directory থেকে **Linux / macOS / Windows Git Bash**-এ চালান (Bash ও curl লাগে; Flutter SDK installer-এর জন্য লাগে না):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.5.0/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.0/scripts/install.sh | bash
 ```
 
-Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ চারটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.5.0`** tag-এ reusable builder pin করে:
+Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ পাঁচটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.8.0`** tag-এ reusable builder pin করে:
 
 | ফাইল | কখন চলে |
 |---|---|
@@ -50,11 +51,12 @@ Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে ন
 | `manual-build.yml` | Actions থেকে ম্যানুয়ালি APK বা AAB |
 | `publish-release.yml` | Actions থেকে ম্যানুয়ালি signed APK/AAB + GitHub Release |
 | `release.yml` | `v*` tag push হলে শুধু signed AAB artifact; GitHub Release নয় |
+| `web-preview.yml` | সব branch-এর push / PR: web build করে GitHub Pages-এ বসায় — browser-এ URL খুলেই test, APK নয় |
 
 **Monorepo-তে একাধিক Flutter app থাকলে** ইচ্ছামতো একটি বেছে দিন (path repo root থেকে):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.5.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 একাধিক app পেলে script আন্দাজ করে ভুলটা বেছে নেবে না; `--app-dir` চাইবে। `--app-name` না দিলে release title-এ `pubspec.yaml`-এর নাম ব্যবহার হয়। `--ref v1.4.0` দিয়ে পুরোনো tested version pin করা যায়; সাধারণত default tag-ই রাখুন। আগে কী লিখবে দেখতে `--dry-run` দিন।
@@ -69,15 +71,15 @@ Remote shell script চালানোর আগে review করতে চা�
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন (`v1.5.0` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
+App project-এর caller workflow-তে tested tag pin করুন (`v1.8.0` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
 ```
 
-Release publish করার জন্য `publish-release.yml@v1.5.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
+Release publish করার জন্য `publish-release.yml@v1.8.0` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
-Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
+Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
 ### ধাপ ২: App project-এ CI যোগ করুন
 
@@ -120,7 +122,6 @@ AAB-এর আগে [Android signing নির্দেশিকা](docs/ANDRO
 
 ```yaml
 name: Publish Android Release
-
 on:
   workflow_dispatch:
     inputs:
@@ -140,7 +141,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -166,7 +167,7 @@ permissions:
   contents: write
 ```
 
-এরপর app-এর `pubspec.yaml` version বাড়ান:
+এরপর app-এর `pubspec.yaml` version বাড়ান:
 
 ```yaml
 version: 1.0.1+2
@@ -178,11 +179,11 @@ version: 1.0.1+2
 App repository → Actions → Publish Android Release → Run workflow
 ```
 
-Workflow স্বয়ংক্রিয়ভাবে:
+Workflow স্বয়ংক্রিয়ভাবে:
 
 1. signed APK ও AAB build করবে;
 2. `pubspec.yaml` থেকে `v1.0.1` tag বানাবে;
-3. আগের tag-এর পরের Git commit titleগুলো category অনুযায়ী সাজাবে;
+3. আগের tag-এর পরের Git commit titleগুলো category অনুযায়ী সাজাবে;
 4. Features, Bug Fixes, Performance, Maintenance, Documentation ইত্যাদি section-সহ English release notes লিখবে;
 5. GitHub Release publish করবে;
 6. versioned APK/AAB এবং `SHA256SUMS.txt` upload করবে।
@@ -210,11 +211,11 @@ This release delivers the latest stable Android build of My Flutter App.
 | `My-Flutter-App-v1.0.1.aab` | Upload to Google Play Console |
 ```
 
-Release notes পরিষ্কার English হওয়ার জন্য commit/PR title English-এ লেখা উচিত। কোনো external AI API key প্রয়োজন হয় না।
+Release notes পরিষ্কার English হওয়ার জন্য commit/PR title English-এ লেখা উচিত। কোনো external AI API key প্রয়োজন হয় না।
 
 ### ধাপ ৫: Tag দিলে automatic AAB (ঐচ্ছিক)
 
-শুধু tag push-এর পরে AAB artifact build করতে `examples/project-workflows/release.yml` ব্যবহার করা যায়:
+শুধু tag push-এর পরে AAB artifact build করতে `examples/project-workflows/release.yml` ব্যবহার করা যায়:
 
 ```bash
 git tag v1.0.0
@@ -223,17 +224,17 @@ git push origin v1.0.0
 
 এটি GitHub Release publish করে না; full release publishing-এর জন্য আগের `publish-release.yml` ব্যবহার করুন।
 
-## Doctor — সমস্যা কোথায়, doctor বলে দেবে
+## Doctor — সমস্যা কোথায়, doctor বলে দেবে
 
-Release-এর আগে একবার চালিয়ে নিন:
+Release-এর আগে একবার চালিয়ে নিন:
 
 ```bash
 bash /path/to/flutter-builder/scripts/doctor.sh
-# অথবা clone ছাড়াই:
+# অথবা clone ছাড়াই:
 curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/doctor.sh | bash
 ```
 
-**App repository-র root থেকে চালাতে হবে** (flutter-builder থেকে নয়)। এটি চেক করে:
+**App repository-র root থেকে চালাতে হবে** (flutter-builder থেকে নয়)। এটি চেক করে:
 
 | Section | যা যা দেখে |
 |---|---|
@@ -248,11 +249,11 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scr
 প্রতিটি সমস্যার পাশেই ঠিক কী করতে হবে লেখা থাকে, শেষে **"Fix these first"** তালিকা।
 `0 failures` মানে release-এর জন্য প্রস্তুত; কোনো FAIL থাকলে exit code `1`।
 
-> ⚠️ Doctor **empty secret** ধরতে পারে না — `gh` কখনো value পড়তে পারে না, আর
-> empty সেট করলেও Updated timestamp আজকের হয়। Empty ধরতে হলে একটা real build
-> চালিয়ে log-এ `OK: android/app/google-services.json is valid JSON` খুঁজতে হবে।
+> ⚠️ Doctor **empty secret** ধরতে পারে না — `gh` কখনো value পড়তে পারে না, আর
+> empty সেট করলেও Updated timestamp আজকের হয়। Empty ধরতে হলে একটা real build
+> চালিয়ে log-এ `OK: android/app/google-services.json is valid JSON` খুঁজতে হবে।
 
-### Release-এ doctor স্বয়ংক্রিয়ভাবে (v1.7.0+)
+### Release-এ doctor স্বয়ংক্রিয়ভাবে (v1.7.0+)
 
 `preflight` input দিলে AAB/APK build-এর **ঠিক আগে** doctor চলে — signing আর
 Firebase config লেখার পরে, তাই সে exactly সেই tree দেখে যা compile হতে যাচ্ছে।
@@ -260,7 +261,7 @@ Firebase config লেখার পরে, তাই সে exactly সেই tr
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.7.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
     with:
       app-name: KeepIt
       working-directory: flutter_app
@@ -271,11 +272,11 @@ jobs:
 
 | Input | Default (build / release) | কাজ |
 |---|---|---|
-| `preflight` | `false` / **`true`** | doctor চালিয়ে FAIL থাকলে build বন্ধ |
+| `preflight` | `false` / **`true`** | doctor চালিয়ে FAIL থাকলে build বন্ধ |
 | `preflight-require-firebase` | `false` / `false` | `google-services.json` অনুপস্থিত থাকলে FAIL |
 
 `preflight-require-firebase: true` মানেই: **`GOOGLE_SERVICES_JSON_BASE64` empty
-হলে আর চুপচাপ offline-only app release হবে না** — build লাল হয়ে বলবে:
+হলে আর চুপচাপ offline-only app release হবে না** — build লাল হয়ে বলবে:
 
 ```text
 FAIL  google-services.json ABSENT after injection —
@@ -287,8 +288,32 @@ FAIL  google-services.json ABSENT after injection —
 
 > 🔴 v1.7.0-এর আগে `publish-release.yml` ভিতরে `flutter-build.yml@v1.5.0` কল
 > করত — কিন্তু Firebase injection v1.6.0-এ এসেছে। তার মানে **release path-এ
-> `google-services.json` কখনো inject-ই হয়নি**, অথচ manual build-এ হয়েছিল।
+> `google-services.json` কখনো inject-ই হয়নি**, অথচ manual build-এ হয়েছিল।
 > v1.7.0 সেটা ঠিক করে। তাই `@v1.7.0`-এ upgrade করা জরুরি।
+
+## Web preview — APK না নামিয়ে browser-এ app দেখা (v1.8.0+)
+
+প্রতিবার APK নামিয়ে install করে test না করে দ্রুত দেখতে: `web-preview.yml` caller প্রতিটি
+push ও PR-এ app-টি web-এ build করে GitHub Pages-এ `preview/<branch>` path-এ বসিয়ে দেয়।
+Actions run-এর step summary (আর PR হলে PR comment) থেকে URL নিয়ে browser-এ খুললেইই চলে:
+
+```text
+https://<username>.github.io/<repo>/preview/main/
+```
+
+একবারের setup: **Settings → Pages → Build and deployment → Deploy from a branch →
+`gh-pages` (root)**। প্রথম run নিজেই `gh-pages` branch বানিয়ে নেয়। App-এ `web/` directory
+না থাকলে একবার `flutter create --platforms web .` চালান।
+
+জেনে রাখুন:
+
+- এটা **build preview**, hot reload নয় — develop করার সময় live debug-এর জন্য locally
+  `flutter run -d chrome` চালান (reload: terminal-এ `r`)।
+- প্রতিটি branch-এর নিজের preview থাকে, তাই একাধিক branch পাশাপাশি দেখা যায়।
+- Camera/Bluetooth-এর মতো web নেই এমন plugin preview-তে কাজ করবে না; final টেস্ট device-এই করুন।
+- `flutter-build.yml`-এর `deploy-web-pages` (release web deploy) Pages-এর root পরিষ্কার করে
+  দেয়, তাই ওটা চালালে preview মুছে যায় — পরের push-এ আবার ফিরে আসে।
+- Caller-এ `comment-on-pr: false` দিলে PR comment বন্ধ।
 
 ## Build-time configuration (AdMob ID, API base URL ইত্যাদি)
 
@@ -299,7 +324,7 @@ Gradle/`AndroidManifest.xml`-এর placeholder-এর মতো যে মা�
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.5.0
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
     with:
       app-name: QuizBaaz
       dart-defines: |
@@ -311,7 +336,7 @@ jobs:
     secrets: inherit
 ```
 
-মানগুলো caller repo-র **Settings → Secrets and variables → Actions → Variables**-এ রাখলে workflow file-এ hardcode করতে হয় না। মনে রাখবেন: dart-define-এর মান binary-র ভেতরে চলে যায় — AdMob ID public identifier, এতে সমস্যা নেই; কিন্তু API key/password এভাবে দেবেন না। AAB step-এর Gradle fallback-ও একই define পায়, তাই strip-workaround path দিয়ে গেলেও test ID দিয়ে bundle তৈরি হবে না।
+মানগুলো caller repo-র **Settings → Secrets and variables → Actions → Variables**-এ রাখলে workflow file-এ hardcode করতে হয় না। মনে রাখবেন: dart-define-এর মান binary-র ভিতরে চলে যায় — AdMob ID public identifier, এতে সমস্যা নেই; কিন্তু API key/password এভাবে দেবেন না। AAB step-এর Gradle fallback-ও একই define পায়, তাই strip-workaround path দিয়ে গেলেও test ID দিয়ে bundle তৈরি হবে না।
 
 `ANDROID_KEYSTORE_BASE64` secret থাকলে APK-only build-ও এখন upload key দিয়ে sign হয় (আগে শুধু AAB/Release-এ হত) — যে project-এর Gradle `key.properties` ছাড়া release build-ই করতে দেয় না, তার APK build এতে আর fail করে না।
 
@@ -331,7 +356,7 @@ base64 -w0 ios/Runner/GoogleService-Info.plist  | gh secret set GOOGLE_SERVICES_
     with:
       google-services-json-base64: ${{ vars.GOOGLE_SERVICES_JSON_BASE64 }}
 
-    # ২) Secret — workflow-এর ভেতর থেকে পড়া হয় (secret সরাসরি with:-এ দেওয়া যায় না)
+    # ২) Secret — workflow-এর ভিতর থেকে পড়া হয় (secret সরাসরি with:-এ দেওয়া যায় না)
     secrets: inherit          # অথবা নিচের মতো explicit mapping
 ```
 
@@ -370,7 +395,7 @@ v1.4.0-এ builder-টা শুধু build করেই থেমে থাক
 ```yaml
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
     with:
       working-directory: flutter_app
       code-coverage: true
@@ -470,9 +495,9 @@ Workflow সফল হলে:
 Actions → Workflow run → Artifacts
 ```
 
-সেখানে `android-release-apk` অথবা `android-release-aab` পাওয়া যাবে। Artifact ZIP হিসেবে download হয়; unzip করলে APK/AAB পাওয়া যাবে।
+সেখানে `android-release-apk` অথবা `android-release-aab` পাওয়া যাবে। Artifact ZIP হিসেবে download হয়; unzip করলে APK/AAB পাওয়া যাবে।
 
-GitHub Release-এ publish করা APK/AAB Actions artifact retention শেষ হলেও expire হয় না; Release delete না করা পর্যন্ত থাকে।
+GitHub Release-এ publish করা APK/AAB Actions artifact retention শেষ হলেও expire হয় না; Release delete না করা পর্যন্ত থাকে।
 
 ## Version bump (প্রয়োজনে)
 
@@ -494,7 +519,7 @@ python3 scripts/bump-pubspec-version.py --pubspec pubspec.yaml --bump build
 `--bump major|minor|patch|build|none`। `patch`/`build`-এ `+N` না থাকলে actionable message দিয়ে exit 1, কারণ Android versionCode ছাড়া Play Store-এ আপলোড যায় না।
 
 
-## Release version নিয়ম
+## Release version নিয়ম
 
 Flutter version format:
 
@@ -512,11 +537,11 @@ version: 1.0.15+15
 - Android `versionName` হবে `1.0.15`
 - Play Store `versionCode` হবে `15`
 
-প্রতিটি Play Store upload-এর আগে version code অবশ্যই বাড়াতে হবে। একই GitHub tag আগে থেকে থাকলে release workflow ইচ্ছাকৃতভাবে fail করবে।
+প্রতিটি Play Store upload-এর আগে version code অবশ্যই বাড়াতে হবে। একই GitHub tag আগে থেকে থাকলে release workflow ইচ্ছাকৃতভাবে fail করবে।
 
 ## Test না থাকলে কী হবে?
 
-`test/` folder-এ `*_test.dart` file থাকলে `flutter test` চলবে। Test file না থাকলে workflow পরিষ্কার message দিয়ে test step skip করবে। Analyze ও format check চলবে।
+`test/` folder-এ `*_test.dart` file থাকলে `flutter test` চলবে। Test file না থাকলে workflow পরিষ্কার message দিয়ে test step skip করবে। Analyze ও format check চলবে।
 
 ## Flutter app subfolder-এ থাকলে
 
@@ -528,7 +553,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -543,7 +568,7 @@ jobs:
 dart format .
 ```
 
-তারপর formatted code commit করুন। Manual build/release-এ প্রয়োজন হলে checks বন্ধ রাখা যায়:
+তারপর formatted code commit করুন। Manual build/release-এ প্রয়োজন হলে checks বন্ধ রাখা যায়:
 
 ```yaml
 run-format-check: false
@@ -562,17 +587,17 @@ git tag v1.5.0
 git push origin v1.5.0
 ```
 
-wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে নিজের ট্যাগেই পিন করে, তাই নতুন ট্যাগ দেওয়ার সময় wrapper-এর ভেতরের pin-টাও একই ট্যাগে বাড়াতে হবে — নাহলে পুরোনো builder চালু থাকবে।
+wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে নিজের ট্যাগেই পিন করে, তাই নতুন ট্যাগ দেওয়ার সময় wrapper-এর ভিতরের pin-টাও একই ট্যাগে বাড়াতে হবে — নাহলে পুরোনো builder চালু থাকবে।
 
-Projectগুলো exact tag দিয়ে pin করতে পারে:
+Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.5.0
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
 ```
 
-## প্রয়োজনীয় GitHub Secrets
+## প্রয়োজনীয় GitHub Secrets
 
-Signed AAB অথবা GitHub Release publishing-এর জন্য app repository-তে প্রয়োজন:
+Signed AAB অথবা GitHub Release publishing-এর জন্য app repository-তে প্রয়োজন:
 
 ```text
 ANDROID_KEYSTORE_BASE64
@@ -591,14 +616,14 @@ FIREBASE_SERVICE_CREDENTIALS   Firebase App Distribution upload
 
 বিস্তারিত: [docs/ANDROID_SIGNING.md](docs/ANDROID_SIGNING.md)
 
-### Agent দিয়ে secret সেট করান
+### Agent দিয়ে secret সেট করান
 
-হাতে না করে AI agent দিয়ে করাতে চাইলে [docs/AGENT_SECRETS_SETUP.md](docs/AGENT_SECRETS_SETUP.md)
+হাতে না করে AI agent দিয়ে করাতে চাইলে [docs/AGENT_SECRETS_SETUP.md](docs/AGENT_SECRETS_SETUP.md)
 টি agent-কে দিন — সে local file (`google-services.json`, keystore, `key.properties`)
-খুঁজে নিয়ে base64 encode করে GitHub Actions-এ বসিয়ে দেবে, কোনো value chat-এ না
-দেখিয়ে। দুটো জিনিসই সেখানে guard করা আছে:
+খুঁজে নিয়ে base64 encode করে GitHub Actions-এ বসিয়ে দেবে, কোনো value chat-এ না
+দেখিয়ে। দুটো জিনিসই সেখানে guard করা আছে:
 
-- `base64 -w0` macOS-এ fail করে — ফলে **empty secret** সেট হয়। স্ক্রিপ্ট
+- `base64 -w0` macOS-এ fail করে — ফলে **empty secret** সেট হয়। স্ক্রিপ্ট
   `openssl base64 -A` ব্যবহার করে (macOS + Linux দুটোতেই চলে)।
 - 40 character-এর ছোট কোনো value সেট করতেই দেবে না।
 
@@ -624,9 +649,9 @@ permissions:
 
 - GitHub token, keystore, `.env`, service-account JSON commit করবেন না।
 - Personal Access Token chat-এ কাউকে দেবেন না।
-- Reusable workflow-কে version tag বা commit SHA দিয়ে pin করুন।
+- Reusable workflow-কে version tag বা commit SHA দিয়ে pin করুন।
 - Project-specific signing secrets app project-এর repository-তেই রাখুন।
-- Publish workflow APK এবং AAB—দুটিকেই একই configured release key দিয়ে sign করে।
+- Publish workflow APK এবং AAB—দুটিকেই একই configured release key দিয়ে sign করে।
 
 ## বর্তমান scope
 
