@@ -1,0 +1,121 @@
+name: Flutter smoke test
+
+# Exercises the toolchain that flutter-build.yml depends on (Flutter SDK,
+# Java 17, Gradle/AGP) against a freshly generated Flutter app. The installer
+# tests only cover scripts/install.sh; nothing else in this repository runs a
+# real Flutter build, so an upstream change (new Flutter stable, new AGP
+# default, broken Gradle cache) would first surface as a failure inside a
+# user's app repository. This workflow catches that breakage here instead.
+#
+# The step order intentionally mirrors the reusable build job in
+# flutter-build.yml (pub get -> format -> analyze -> test -> APK), so keeping
+# the two in sync is a one-glance diff.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/flutter-build.yml
+      - .github/workflows/flutter-smoke-test.yml
+  pull_request:
+    paths:
+      - .github/workflows/flutter-build.yml
+      - .github/workflows/flutter-smoke-test.yml
+  schedule:
+    # Weekly, even when nothing changes here: catches upstream Flutter /
+    # Gradle / runner-image breakage before callers hit it.
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      flutter-channel:
+        description: Flutter channel to smoke test (stable, beta, or master)
+        required: false
+        type: string
+        default: stable
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Fresh app through the build pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SMOKE_APP_DIR: smoke-app
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate workflow YAML syntax
+        run: |
+          python3 - <<'PYTHON'
+          import glob
+          import sys
+
+          try:
+              import yaml
+          except ImportError:
+              sys.exit("PyYAML is not available on this runner image")
+
+          files = sorted(
+              glob.glob(".github/workflows/*.yml")
+              + glob.glob("examples/project-workflows/*.yml")
+          )
+          for path in files:
+              with open(path, encoding="utf-8") as handle:
+                  yaml.safe_load(handle)
+              print(f"OK: {path}")
+          print(f"{len(files)} workflow files parsed successfully")
+          PYTHON
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel || 'stable' }}
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      - name: Generate a fresh Flutter app
+        run: |
+          flutter create \
+            --org dev.flutterbuilder.smoke \
+            --project-name flutter_builder_smoke_app \
+            "$SMOKE_APP_DIR"
+          # flutter create ships a widget_test.dart, so flutter test has
+          # something real to run below.
+
+      - name: Install dependencies
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: flutter pub get
+
+      - name: Check Dart formatting
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze source code
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: flutter analyze --fatal-infos
+
+      - name: Run tests
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: flutter test
+
+      - name: Build debug APK
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: flutter build apk --debug
+
+      - name: Verify the APK exists
+        working-directory: ${{ env.SMOKE_APP_DIR }}
+        run: |
+          ls -lh build/app/outputs/flutter-apk/*.apk
