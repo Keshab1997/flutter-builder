@@ -51,8 +51,10 @@ jobs:
       - name: Lint workflows with actionlint
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          # SC2012 (ls vs find) is an info-level style note in flutter-build.yml.
-          ./actionlint -color -ignore 'SC2012' .github/workflows/*.yml examples/project-workflows/*.yml
+          # Info-level shellcheck notes (style, e.g. SC2012/SC2015) are not
+          # gates here - same philosophy as the -S warning shellcheck step in
+          # installer-tests.yml. Warnings and errors still fail the build.
+          ./actionlint -color -ignore 'SC[0-9]+:info' .github/workflows/*.yml examples/project-workflows/*.yml
 
       - name: Set up Java
         uses: actions/setup-java@v5

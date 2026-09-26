@@ -37,13 +37,12 @@ is_flutter_pubspec() {
 }
 
 yaml_quote() {
-  local value="$1"
-  value="${value//\\/\\\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
-  printf '"%s"' "$value"
+  # sed instead of ${var//pattern/replacement}: bash 5.2 point releases
+  # changed how backslashes inside quoted replacement strings are interpreted,
+  # which silently doubled every backslash in the output on Ubuntu 24.04's
+  # bash 5.2.21. sed is deterministic everywhere. Callers validate that the
+  # value is a single line without control characters before calling this.
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 }
 
 app_dir_arg=''
