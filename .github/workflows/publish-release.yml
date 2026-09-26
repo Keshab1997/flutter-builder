@@ -13,7 +13,7 @@ name: Reusable Publish Android Release
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.7.0
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.0
 #       with:
 #         app-name: SpeakEasy
 #       secrets: inherit
@@ -257,7 +257,7 @@ jobs:
     # MUST stay in step with the tag this file is published under. The
     # google-services.json injection only exists from v1.6.0 onwards, so an
     # older ref here silently releases an offline-only app.
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.7.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.0
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
