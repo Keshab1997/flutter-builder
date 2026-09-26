@@ -17,10 +17,12 @@ on:
     paths:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
+      - .github/workflows/web-preview.yml
   pull_request:
     paths:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
+      - .github/workflows/web-preview.yml
   schedule:
     # Weekly, even when nothing changes here: catches upstream Flutter /
     # Gradle / runner-image breakage before callers hit it.
@@ -46,27 +48,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Validate workflow YAML syntax
+      - name: Lint workflows with actionlint
         run: |
-          python3 - <<'PYTHON'
-          import glob
-          import sys
-
-          try:
-              import yaml
-          except ImportError:
-              sys.exit("PyYAML is not available on this runner image")
-
-          files = sorted(
-              glob.glob(".github/workflows/*.yml")
-              + glob.glob("examples/project-workflows/*.yml")
-          )
-          for path in files:
-              with open(path, encoding="utf-8") as handle:
-                  yaml.safe_load(handle)
-              print(f"OK: {path}")
-          print(f"{len(files)} workflow files parsed successfully")
-          PYTHON
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          # SC2012 (ls vs find) is an info-level style note in flutter-build.yml.
+          ./actionlint -color -ignore 'SC2012' .github/workflows/*.yml examples/project-workflows/*.yml
 
       - name: Set up Java
         uses: actions/setup-java@v5

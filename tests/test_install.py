@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
-FILES = ("ci.yml", "manual-build.yml", "publish-release.yml", "release.yml")
+FILES = (
+    "ci.yml",
+    "manual-build.yml",
+    "publish-release.yml",
+    "release.yml",
+    "web-preview.yml",
+)
 PUBSPEC = """name: demo_app
 version: 1.0.0+1
 environment:
@@ -62,13 +68,16 @@ class InstallerTests(unittest.TestCase):
         self.assert_success(first)
         before = {name: self.installed(name) for name in FILES}
         for content in before.values():
-            self.assertIn("@v1.5.0", content)
+            self.assertIn("@v1.8.0", content)
             self.assertIn('working-directory: "."', content)
         self.assertIn("code-coverage: true", before["ci.yml"])
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
-        self.assertIn("publish-release.yml@v1.5.0", before["publish-release.yml"])
+        self.assertIn("publish-release.yml@v1.8.0", before["publish-release.yml"])
         self.assertIn('tags:\n      - "v*"', before["release.yml"])
+        self.assertIn("web-preview.yml@v1.8.0", before["web-preview.yml"])
+        self.assertIn("secrets: inherit", before["web-preview.yml"])
+        self.assertIn('group: web-preview-${{ github.ref }}', before["web-preview.yml"])
 
         second = self.run_installer()
         self.assert_success(second)
@@ -145,7 +154,7 @@ class InstallerTests(unittest.TestCase):
         target.write_text("# Custom CI, keep it\n", encoding="utf-8")
         result = self.run_installer("--force")
         self.assert_success(result)
-        self.assertIn("@v1.5.0", self.installed("ci.yml"))
+        self.assertIn("@v1.8.0", self.installed("ci.yml"))
         backups = list((self.repo / ".github/flutter-builder-backups").glob("*/ci.yml"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(), "# Custom CI, keep it\n")

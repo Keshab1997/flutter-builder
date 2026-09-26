@@ -3,9 +3,9 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.5.0
+DEFAULT_REF=v1.8.0
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
-FILES=(ci.yml manual-build.yml publish-release.yml release.yml)
+FILES=(ci.yml manual-build.yml publish-release.yml release.yml web-preview.yml)
 
 say() { printf '[flutter-builder] %s\n' "$*"; }
 fail() { printf '[flutter-builder] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -15,30 +15,30 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.5.0/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.0/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
   --app-name NAME   Display name for GitHub Releases (default: pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.5.0)
+  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.0)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first
   -h, --help        Show this help
 
 Options over a pipe: curl -fsSL URL | bash -s -- --app-dir apps/mobile --app-name "My App"
-Installs ci.yml, manual-build.yml, publish-release.yml and release.yml into
+Installs ci.yml, manual-build.yml, publish-release.yml, release.yml and web-preview.yml into
 .github/workflows/ at the Git repository root. Never adds GitHub secrets or
 pushes code. Only --force may replace an existing workflow.
 HELP
 }
 
 is_flutter_pubspec() {
-  [ -f "$1" ] && grep -Eq "^[[:space:]]*sdk:[[:space:]]*['\"]?flutter['\"]?([[:space:]]*(#.*)?)?$" "$1"
+  [ -f "$1" ] && grep -Eq "^[[:space:]]*sdk:[[:space:]]*['\\\"]?flutter['\\\"]?([[:space:]]*(#.*)?)?$" "$1"
 }
 
 yaml_quote() {
   local value="$1"
-  value="${value//\\/\\\\}"
+  value="${value//\\/\\\\\\}"
   value="${value//\"/\\\"}"
   value="${value//$'\n'/\\n}"
   value="${value//$'\r'/\\r}"
@@ -289,6 +289,43 @@ YAML
 YAML
 } > "$stage/release.yml"
 
+
+{
+  cat <<'YAML'
+name: Web Preview
+
+# Builds the app for the web on every push and pull request and publishes it
+# to GitHub Pages under preview/<branch>: test the app by opening a URL in a
+# browser instead of installing an APK. One-time setup: Settings -> Pages ->
+# Build and deployment -> Deploy from a branch -> gh-pages (root); the first
+# run creates the branch. Needs the web platform (flutter create --platforms
+# web .); plugins without web support will not work in the preview.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: web-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+YAML
+  printf '    uses: %s/web-preview.yml@%s\n' "$REUSABLE" "$ref"
+  cat <<'YAML'
+    with:
+YAML
+  printf '      working-directory: %s\n' "$yaml_dir"
+  cat <<'YAML'
+      comment-on-pr: true
+    secrets: inherit
+YAML
+} > "$stage/web-preview.yml"
+
 workflows="$repo_root/.github/workflows"
 changes=()
 conflicts=()
@@ -319,7 +356,7 @@ if [ "${#conflicts[@]}" -gt 0 ] && [ "$force" = false ]; then
   fail "Existing workflow(s) differ; nothing was changed. Review them, or rerun with --force to back them up and replace them."
 fi
 if [ "${#changes[@]}" -eq 0 ]; then
-  say "All four workflows are already installed; nothing changed."
+  say "All ${#FILES[@]} workflows are already installed; nothing changed."
   exit 0
 fi
 if [ "$dry_run" = true ]; then

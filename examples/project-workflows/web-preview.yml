@@ -7,8 +7,6 @@ name: Web Preview
 # One-time setup: Settings -> Pages -> Deploy from a branch -> gh-pages (root).
 # The first run creates the gh-pages branch.
 #
-# Pin this to the next flutter-builder release tag (v1.8.0) once it exists;
-# until then @main tracks the latest workflow.
 
 on:
   push:
@@ -24,7 +22,7 @@ concurrency:
 
 jobs:
   preview:
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@main
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.0
     with:
       # working-directory: apps/mobile   # if the app lives in a subfolder
       comment-on-pr: true
