@@ -229,6 +229,11 @@ on:
         required: false
         type: string
         default: ""
+      play-whats-new-directory:
+        description: Optional directory under working-directory containing whatsnew-<LOCALE> release-note files
+        required: false
+        type: string
+        default: ""
       play-status:
         description: Google Play release status (completed, draft, halted, inProgress)
         required: false
@@ -1014,6 +1019,7 @@ jobs:
           releaseFiles: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
           track: ${{ inputs.play-track }}
           status: ${{ inputs.play-status }}
+          whatsNewDirectory: ${{ inputs.play-whats-new-directory != '' && format('{0}/{1}', inputs.working-directory, inputs.play-whats-new-directory) || '' }}
 
       - name: Prepare GitHub Release and English release notes
         if: inputs.publish-github-release

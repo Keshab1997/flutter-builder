@@ -207,6 +207,11 @@ on:
         required: false
         type: string
         default: ""
+      play-whats-new-directory:
+        description: "Optional directory under working-directory containing whatsnew-<LOCALE> release-note files"
+        required: false
+        type: string
+        default: ""
       play-status:
         description: "Google Play release status (completed, draft, halted, inProgress)"
         required: false
@@ -297,6 +302,7 @@ jobs:
       notify-webhook: ${{ inputs.notify-webhook }}
       play-track: ${{ inputs.play-track }}
       play-package-name: ${{ inputs.play-package-name }}
+      play-whats-new-directory: ${{ inputs.play-whats-new-directory }}
       play-status: ${{ inputs.play-status }}
       firebase-groups: ${{ inputs.firebase-groups }}
       firebase-app-id: ${{ inputs.firebase-app-id }}

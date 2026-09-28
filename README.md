@@ -8,7 +8,7 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 |---|---|---|
 | `ci.yml` | **Flutter CI — Format, Analyze & Test** | Push, pull request ও manual run-এ Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
 | `manual-build.yml` | **Build Android APK or AAB (Manual)** | Actions থেকে বেছে নিলে APK অথবা AAB build করে artifact দেয়। |
-| `publish-release.yml` | **Publish Signed Android Release** | Actions থেকে চালালে signed APK/AAB build করে, version tag ও GitHub Release প্রকাশ করে; release notes ও checksum-ও যোগ করে। |
+| `publish-release.yml` | **Publish Signed Android Release** | একবার signed APK/AAB build করে GitHub Release প্রকাশ করে; চাইলে একই AAB Google Play Internal testing-এ upload ও Play release notes পাঠায়। |
 | `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Push/PR-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে। |
 
 
@@ -63,6 +63,10 @@ version: 1.2.3+4
 ```
 
 `1.2.3` হলো user-facing version; `4` হলো Android version code এবং প্রতিটি Play Store release-এ বাড়তে হবে। Release workflow-তে placeholder app ID (`com.example.*`) বা Google test ad ID থাকলে build বন্ধ হতে পারে—publish-এর আগে সেগুলো বদলান।
+
+### Play Store Internal testing (optional)
+
+দুটি আলাদা AAB build workflow লাগবে না: `publish-release.yml`-এ Play upload option চালু করলে একই signed AAB GitHub Release-এ যোগ হবে এবং Google Play Internal testing-এও যাবে। App repo-তে `PLAY_SERVICE_ACCOUNT_JSON` ও signing secrets দিন, তারপর caller workflow-তে Play option/package name সেট করুন। `distribution/whatsnew/`-এ locale notes থাকলে সেগুলোও Play-এ যাবে। পূর্ণ ধাপ: [`docs/PLAY_INTERNAL_TESTING.md`](docs/PLAY_INTERNAL_TESTING.md)। Secret কখনো public builder repository-তে দেবেন না.
 
 ### Web preview (optional)
 

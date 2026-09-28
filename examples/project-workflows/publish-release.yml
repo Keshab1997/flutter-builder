@@ -18,15 +18,28 @@ on:
         required: false
         type: boolean
         default: false
+      upload_to_play_internal:
+        description: Also upload the signed AAB to Google Play Internal testing?
+        required: false
+        type: boolean
+        default: false
+      package_name:
+        description: Android applicationId / Play Console package name (required if Play upload is enabled)
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@main
     with:
       app-name: My Flutter App
       release-draft: ${{ inputs.draft }}
       release-prerelease: ${{ inputs.prerelease }}
+      play-track: ${{ inputs.upload_to_play_internal && 'internal' || '' }}
+      play-package-name: ${{ inputs.package_name }}
+      play-whats-new-directory: ${{ inputs.upload_to_play_internal && 'distribution/whatsnew' || '' }}
+      play-status: completed
     secrets: inherit
