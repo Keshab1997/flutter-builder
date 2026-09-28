@@ -1,4 +1,4 @@
-name: Reusable Flutter Build
+name: Reusable Flutter CI and Android Build
 
 on:
   workflow_call:

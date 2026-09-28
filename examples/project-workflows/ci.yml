@@ -1,4 +1,4 @@
-name: Flutter CI
+name: Flutter CI — Format, Analyze & Test
 
 on:
   pull_request:

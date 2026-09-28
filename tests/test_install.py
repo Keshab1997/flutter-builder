@@ -12,7 +12,6 @@ FILES = (
     "ci.yml",
     "manual-build.yml",
     "publish-release.yml",
-    "release.yml",
     "web-preview.yml",
 )
 PUBSPEC = """name: demo_app
@@ -74,7 +73,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
         self.assertIn("publish-release.yml@v1.8.1", before["publish-release.yml"])
-        self.assertIn('tags:\n      - "v*"', before["release.yml"])
+        self.assertFalse((self.repo / ".github/workflows/release.yml").exists())
         self.assertIn("web-preview.yml@v1.8.1", before["web-preview.yml"])
         self.assertIn("secrets: inherit", before["web-preview.yml"])
         self.assertIn('group: web-preview-${{ github.ref }}', before["web-preview.yml"])

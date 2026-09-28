@@ -1,4 +1,4 @@
-name: Web Preview
+name: Deploy Flutter Web Preview (GitHub Pages)
 
 # Builds the app for the web on every push and pull request and deploys it to
 # GitHub Pages under preview/<branch>, so you can test the app by opening a

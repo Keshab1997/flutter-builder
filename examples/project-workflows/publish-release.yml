@@ -1,9 +1,9 @@
-name: Publish Android Release
+name: Publish Signed Android Release
 
 # Wrapper-first form: the release policy lives in the builder repo, so this
 # file barely changes between projects — point it at a new app, set the name,
 # done. The older form (calling flutter-build.yml directly and spelling out
-# every input) still works; manual-build.yml and release.yml use that shape.
+# every input) still works; manual-build.yml uses that shape.
 
 on:
   workflow_dispatch:

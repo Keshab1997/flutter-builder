@@ -1,4 +1,4 @@
-name: Reusable Web Preview
+name: Reusable Flutter Web Preview Deployment
 
 # Builds the caller's Flutter app for the web and deploys it to GitHub Pages
 # under a per-branch path, so a push gives you a clickable browser URL instead

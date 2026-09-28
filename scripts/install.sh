@@ -5,7 +5,7 @@ set -euo pipefail
 
 DEFAULT_REF=v1.8.1
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
-FILES=(ci.yml manual-build.yml publish-release.yml release.yml web-preview.yml)
+FILES=(ci.yml manual-build.yml publish-release.yml web-preview.yml)
 
 say() { printf '[flutter-builder] %s\n' "$*"; }
 fail() { printf '[flutter-builder] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -26,7 +26,7 @@ Options when running a downloaded/local script:
   -h, --help        Show this help
 
 Options over a pipe: curl -fsSL URL | bash -s -- --app-dir apps/mobile --app-name "My App"
-Installs ci.yml, manual-build.yml, publish-release.yml, release.yml and web-preview.yml into
+Installs ci.yml, manual-build.yml, publish-release.yml and web-preview.yml into
 .github/workflows/ at the Git repository root. Never adds GitHub secrets or
 pushes code. Only --force may replace an existing workflow.
 HELP
@@ -138,7 +138,7 @@ trap 'rm -rf -- "$stage"' EXIT
 # release display name are dynamic.
 {
   cat <<'YAML'
-name: Flutter CI
+name: Flutter CI — Format, Analyze & Test
 
 # Validates every branch and pull request. No Android artifacts on push.
 on:
@@ -174,7 +174,7 @@ YAML
 
 {
   cat <<'YAML'
-name: Manual Android Build
+name: Build Android APK or AAB (Manual)
 
 # Actions -> Manual Android Build -> Run workflow. AAB requires signing secrets.
 on:
@@ -215,7 +215,7 @@ YAML
 
 {
   cat <<'YAML'
-name: Publish Android Release
+name: Publish Signed Android Release
 
 # Manual only: builds a signed APK/AAB, creates a version tag and GitHub Release.
 # The reusable publish wrapper enforces version and placeholder safety checks.
@@ -256,42 +256,7 @@ YAML
 
 {
   cat <<'YAML'
-name: Android Release (tag build only)
-
-# Pushing a v* tag builds a signed AAB artifact; it does not publish a Release.
-on:
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: read
-
-jobs:
-  release-aab:
-YAML
-  printf '    uses: %s/flutter-build.yml@%s\n' "$REUSABLE" "$ref"
-  cat <<'YAML'
-    with:
-      flutter-channel: stable
-YAML
-  printf '      working-directory: %s\n' "$yaml_dir"
-  cat <<'YAML'
-      build-apk: false
-      build-aab: true
-      artifact-retention-days: 30
-    secrets:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-YAML
-} > "$stage/release.yml"
-
-
-{
-  cat <<'YAML'
-name: Web Preview
+name: Deploy Flutter Web Preview (GitHub Pages)
 
 # Builds the app for the web on every push and pull request and publishes it
 # to GitHub Pages under preview/<branch>: test the app by opening a URL in a

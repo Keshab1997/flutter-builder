@@ -1,4 +1,4 @@
-name: Reusable Publish Android Release
+name: Reusable Signed Android Release Publisher
 
 # Release-shaped defaults on top of flutter-build.yml, so a project wires this
 # up in six lines instead of re-declaring fifteen inputs on every release path:
