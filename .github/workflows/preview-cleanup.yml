@@ -18,10 +18,10 @@ name: Reusable Flutter Web Preview Cleanup
 #   jobs:
 #     preview:
 #       if: github.event_name != 'delete'
-#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.2
+#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.5
 #     cleanup:
 #       if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.2
+#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.5
 #       permissions:
 #         contents: write
 #
@@ -101,6 +101,7 @@ jobs:
           PAGES_BRANCH: ${{ inputs.pages-branch }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PATH: ${{ github.event_path }}
+          EVENT_REF: ${{ github.event.ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -111,7 +112,14 @@ jobs:
             [ -n "$branch" ] || branch="$(jq -r '.ref // empty' "$EVENT_PATH")"
             ref_type="$(jq -r '.ref_type // empty' "$EVENT_PATH")"
           fi
+          # A delete event left EVENT_PATH unreadable inside a called workflow,
+          # so the caller passes the deleted ref explicitly (branch-name) and the
+          # event context is the second source. github.ref_name must never be used
+          # for a delete event: there it is the *default* branch, which matches
+          # keep-branches and turns the cleanup into a silent no-op.
+          [ -n "$branch" ] || branch="$EVENT_REF"
           [ -n "$branch" ] || branch="$REF_NAME"
+          raw_branch="$branch"
           branch="${branch#refs/heads/}"
           branch="${branch#refs/tags/}"
 
@@ -129,9 +137,21 @@ jobs:
             skip "the deleted ref was a $ref_type, not a branch"
             exit 0
           fi
+          # The payload can be unreadable (see below), so the ref prefix is the
+          # second way to tell a tag from a branch. Callers usually guard with
+          # github.event.ref_type == 'branch' as well.
+          case "$raw_branch" in
+            refs/tags/*)
+              skip "the deleted ref was a tag, not a branch"
+              exit 0
+              ;;
+          esac
           if [ -z "$branch" ] || [ "$branch" = "null" ]; then
             skip "no branch name in this event"
             exit 0
+          fi
+          if [ "$EVENT_NAME" = "delete" ] && [ "$branch" = "$REF_NAME" ]; then
+            echo "::warning::This delete event carried no deleted ref, so no preview was removed. Pass the deleted ref from the caller, e.g. branch-name: \${{ github.event.ref }}."
           fi
           if [ "$branch" = "$PAGES_BRANCH" ]; then
             skip "$branch is the pages branch itself"
@@ -231,7 +251,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit --quiet -m "chore(pages): remove preview for deleted branch ${BRANCH}"
-          git push --quiet origin "HEAD:${PAGES_BRANCH}"
+
+          # A preview deploy can be writing to the pages branch at the same
+          # moment: merging a pull request and deleting its branch happens in
+          # one go. The deploy pushes at the very end of its run, so a rejected
+          # push here is rare but not impossible. Fetch and replay the removal on
+          # top of whatever landed first instead of failing the cleanup.
+          for attempt in 1 2 3 4 5; do
+            if git push --quiet origin "HEAD:${PAGES_BRANCH}"; then
+              break
+            fi
+            if [ "$attempt" -ge 5 ]; then
+              echo "::error::Could not push the removal of ${DIRECTORY} to ${PAGES_BRANCH} after 5 attempts."
+              exit 1
+            fi
+            echo "Push attempt ${attempt} was rejected; another run is writing to ${PAGES_BRANCH}. Fetching and retrying."
+            git fetch --quiet origin "${PAGES_BRANCH}"
+            if ! git rebase --quiet "origin/${PAGES_BRANCH}"; then
+              git rebase --abort || true
+              echo "::error::Could not replay the removal of ${DIRECTORY} on top of ${PAGES_BRANCH}."
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
 
           echo "removed=true" >> "$GITHUB_OUTPUT"
           {
