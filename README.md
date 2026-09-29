@@ -17,13 +17,13 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 GitHub-এ থাকা Flutter app-এর directory থেকে Linux, macOS বা Windows Git Bash-এ চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.5/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.6/scripts/install.sh | bash
 ```
 
 Installer `.github/workflows/`-এ চারটি caller workflow বসায়। Monorepo-তে app-এর directory নির্দিষ্ট করুন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.5/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.6/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 Installer-এ Flutter SDK লাগে না। এটি git commit/push করে না, secrets তৈরি করে না, বা workflow run শুরু করে না। ফাইলগুলো দেখে তারপর commit/push করুন।
@@ -32,7 +32,7 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
 - `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
-- `--ref v1.8.5`: reusable workflow version pin; default `v1.8.5`
+- `--ref v1.8.6`: reusable workflow version pin; default `v1.8.6`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে
 
@@ -99,7 +99,7 @@ concurrency:
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.5
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.6
     with:
       working-directory: "."
       comment-on-pr: true
@@ -107,7 +107,7 @@ jobs:
 
   cleanup:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.5
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.6
     with:
       # delete event-এ payload called workflow-এ পড়া যায় না; তাই caller নিজেই
       # deleted ref-টা পাঠায় (এটা না দিলে cleanup চুপচাপ কিছুই মোছে না)।
@@ -116,14 +116,42 @@ jobs:
       contents: write
 ```
 
-Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে। সব preview একটাই concurrency lane-এ (`group: web-preview`) চলে, কারণ gh-pages একটাই: deploy action compare-and-swap দিয়ে push করে, তাই দুই রান একসাথে লিখলে একটা reject হয় — আর branch update করলেই push ও pull_request দুটো ইভেন্ট একসাথে চলে, ফলে collision সহজ। Queue করার ফলে delete-এর cleanup কোনো চলমান deploy বাতিল করে না; reject হলে cleanup fetch + rebase করে ৫ বার চেষ্টা করে। এই ফিক্সগুলো **v1.8.5**-এ আছে। **গুরুত্বপূর্ণ:** delete event-এর payload called workflow-এর ভেতরে পড়া যায় না, আর delete event-এ `github.ref_name` হলো *default branch* — তাই আগে cleanup `main` ধরে নিয়ে keep-branches-এ skip হয়ে চুপচাপ কিছুই মোছেনি। এখন caller-ই deleted ref পাঠায় (`branch-name: ${{ github.event.ref }}`), আর reusable workflow `github.event.ref`-ও দেখে; কোনো ref না পেলে `::warning::` দিয়ে সেটা জানায় — নীরব no-op নয়।
+Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে। সব preview একটাই concurrency lane-এ (`group: web-preview`) চলে, কারণ gh-pages একটাই: deploy action compare-and-swap দিয়ে push করে, তাই দুই রান একসাথে লিখলে একটা reject হয় — আর branch update করলেই push ও pull_request দুটো ইভেন্ট একসাথে চলে, ফলে collision সহজ। Queue করার ফলে delete-এর cleanup কোনো চলমান deploy বাতিল করে না; reject হলে cleanup fetch + rebase করে ৫ বার চেষ্টা করে। এই ফিক্সগুলো **v1.8.6**-এ আছে। **গুরুত্বপূর্ণ:** delete event-এর payload called workflow-এর ভেতরে পড়া যায় না, আর delete event-এ `github.ref_name` হলো *default branch* — তাই আগে cleanup `main` ধরে নিয়ে keep-branches-এ skip হয়ে চুপচাপ কিছুই মোছেনি। এখন caller-ই deleted ref পাঠায় (`branch-name: ${{ github.event.ref }}`), আর reusable workflow `github.event.ref`-ও দেখে; কোনো ref না পেলে `::warning::` দিয়ে সেটা জানায় — নীরব no-op নয়।
+
+### About → Website link নিজে সেট (v1.8.6+)
+
+Repo-র পেজে **Settings → About → Website** ঘরে বসানো লিংকটা web preview hook করে রাখা যায়, যাতে প্রজেক্ট পেজ আর অ্যাপ দুটোই একই জায়গায় নিয়ে যায়। `set-about-link: true` দিলে default branch-এ push হলে (অর্থাৎ merge হলে) workflow নিজেই ওই ঘরটা আপডেট করে।
+
+কেন একটা credential লাগে: repo settings বদলাতে GitHub API-তে **Administration: write** দরকার, যেটা Actions-এর নিজের `GITHUB_TOKEN`-এ **নেই**। তাই দুটো পথ:
+
+**পথ ১ — GitHub App (টোকেন নিজে rotate হয়)**
+
+```yaml
+# caller-এ
+    with:
+      set-about-link: true
+      app-id: ${{ vars.APP_ID }}
+```
+Repo-তে (Settings → Secrets and variables → Actions): secret `APP_PRIVATE_KEY` = app-এর private key (.pem), variable `APP_ID` = app id। App-টা যেন repo-তে installed থাকে আর তার `administration: write` permission থাকে।
+
+**পথ ২ — Fine-grained PAT (ক্ষমতা সবচেয়ে কম)**
+
+PAT বানান: [fine-grained token](https://github.com/settings/personal-access-tokens/new) → শুধু এই repo → permission **Administration: Read and write** (বাকি সব No access)। তারপর secret `ABOUT_LINK_TOKEN`-এ রাখুন। `app-id` খালি থাকলে workflow PAT-ই ব্যবহার করে।
+
+নিরাপত্তার নিয়মগুলো:
+
+- **শুধু default branch-এর push-এ চলে** → লিংক সবসময় stable `preview/main`-এর মতো, কোনো branch preview নয়
+- **আপনার নিজের website কখনো মুছে দেয় না** — About খালি না থাকলে আর সেটা আমাদের preview না হলে skip + `::warning::`; `about-link-overwrite: true` দিলে তবেই বদলায়
+- **আগে যাচাই করে URL লাইভ (HTTP 200)** — মরা লিংক বসায় না
+- একই লিংক থাকলে কিছুই করে না (idempotent); কী বদলাল তা Step summary-তে দেখা যায়
+- credential না থাকলে কিছুই বদলায় না, শুধু একটা `::notice::` দেখায়
 
 ## Reusable workflow নিজে যোগ করা
 
 Installer ব্যবহার না করলে `examples/project-workflows/` থেকে দরকারি YAML app repository-র `.github/workflows/`-এ কপি করুন। Production ব্যবহারে reusable workflow-গুলোকে version tag-এ pin করুন, যেমন:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.5
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.6
 ```
 
 `@main` development-এর জন্য চললেও release workflow-তে version tag বা commit SHA বেশি নির্ভরযোগ্য।
