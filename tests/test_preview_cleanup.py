@@ -152,21 +152,20 @@ class PreviewCleanupTests(unittest.TestCase):
         # A retry loop is pointless if the push still runs outside of it.
         self.assertEqual(text.count("git push --quiet"), 1)
 
-    def test_caller_gives_deletions_their_own_concurrency_lane(self) -> None:
-        """A delete event carries the default branch in github.ref.
+    def test_every_preview_writer_shares_one_concurrency_lane(self) -> None:
+        """One gh-pages branch means one writer at a time.
 
-        Sharing the preview lane would let a branch deletion cancel the default
-        branch's preview deploy, and a second deletion cancel the first cleanup.
+        Updating a branch that has an open pull request fires a push run and a
+        pull_request run at once; both deploy the same folder and the deploy
+        action pushes with a compare-and-swap, so the second push is rejected
+        ("cannot lock ref"). Cancelling instead of queueing is no better: it
+        dropped the deploy of the default branch when a branch was deleted.
         """
-        example = EXAMPLE.read_text(encoding="utf-8")
-        self.assertIn(
-            "group: web-preview-${{ github.event_name }}-${{ github.ref }}", example
-        )
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name != 'delete' }}", example
-        )
-        installer = INSTALLER.read_text(encoding="utf-8")
-        self.assertIn("web-preview-${{ github.event_name }}-${{ github.ref }}", installer)
+        for path in (EXAMPLE, INSTALLER):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("group: web-preview\n", text, path)
+            self.assertIn("cancel-in-progress: false", text, path)
+            self.assertNotIn("group: web-preview-${{", text, path)
 
     def test_installer_ships_the_cleanup_job_and_the_same_pin(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")
