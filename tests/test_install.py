@@ -67,16 +67,22 @@ class InstallerTests(unittest.TestCase):
         self.assert_success(first)
         before = {name: self.installed(name) for name in FILES}
         for content in before.values():
-            self.assertIn("@v1.8.1", content)
+            self.assertIn("@v1.8.2", content)
             self.assertIn('working-directory: "."', content)
         self.assertIn("code-coverage: true", before["ci.yml"])
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
-        self.assertIn("publish-release.yml@v1.8.1", before["publish-release.yml"])
+        self.assertIn("publish-release.yml@v1.8.2", before["publish-release.yml"])
         self.assertFalse((self.repo / ".github/workflows/release.yml").exists())
-        self.assertIn("web-preview.yml@v1.8.1", before["web-preview.yml"])
+        self.assertIn("web-preview.yml@v1.8.2", before["web-preview.yml"])
         self.assertIn("secrets: inherit", before["web-preview.yml"])
         self.assertIn('group: web-preview-${{ github.ref }}', before["web-preview.yml"])
+        self.assertIn("preview-cleanup.yml@v1.8.2", before["web-preview.yml"])
+        self.assertIn("  delete:", before["web-preview.yml"])
+        self.assertIn("if: github.event_name != 'delete'", before["web-preview.yml"])
+        self.assertIn(
+            "github.event.ref_type == 'branch'", before["web-preview.yml"]
+        )
 
         second = self.run_installer()
         self.assert_success(second)
@@ -153,12 +159,33 @@ class InstallerTests(unittest.TestCase):
         target.write_text("# Custom CI, keep it\n", encoding="utf-8")
         result = self.run_installer("--force")
         self.assert_success(result)
-        self.assertIn("@v1.8.1", self.installed("ci.yml"))
+        self.assertIn("@v1.8.2", self.installed("ci.yml"))
         backups = list((self.repo / ".github/flutter-builder-backups").glob("*/ci.yml"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(), "# Custom CI, keep it\n")
         for name in FILES:
             self.assertTrue((target.parent / name).is_file())
+
+    def test_installed_web_preview_cleans_up_deleted_branches(self) -> None:
+        """The generated caller must keep the preview and cleanup in one file.
+
+        The `delete` event only fires in the repository that owns the branch, so
+        a separate file in the reusable repo would never run; it also has to run
+        from the default branch, which is why the caller ships the cleanup job
+        next to the preview job.
+        """
+        self.flutter_app()
+        result = self.run_installer()
+        self.assert_success(result)
+        caller = self.installed("web-preview.yml")
+        self.assertIn("  delete:", caller)
+        self.assertIn("preview-cleanup.yml@v1.8.2", caller)
+        self.assertIn("if: github.event_name != 'delete'", caller)
+        self.assertIn("github.event.ref_type == 'branch'", caller)
+        self.assertIn("contents: write", caller)
+        # preview-cleanup.yml must not be installed as a project workflow: app
+        # repositories only need the caller, never the reusable workflow itself.
+        self.assertFalse((self.repo / ".github/workflows/preview-cleanup.yml").exists())
 
     def test_force_dry_run_does_not_make_backups(self) -> None:
         self.flutter_app()

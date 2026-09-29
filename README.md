@@ -9,7 +9,7 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 | `ci.yml` | **Flutter CI — Format, Analyze & Test** | Push, pull request ও manual run-এ Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
 | `manual-build.yml` | **Build Android APK or AAB (Manual)** | Actions থেকে বেছে নিলে APK অথবা AAB build করে artifact দেয়। |
 | `publish-release.yml` | **Publish Signed Android Release** | একবার signed APK/AAB build করে GitHub Release প্রকাশ করে; চাইলে একই AAB Google Play Internal testing-এ upload ও Play release notes পাঠায়। |
-| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Push/PR-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে। |
+| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Push/PR-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
 
 
 ## দ্রুত setup (প্রস্তাবিত)
@@ -17,13 +17,13 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 GitHub-এ থাকা Flutter app-এর directory থেকে Linux, macOS বা Windows Git Bash-এ চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
 ```
 
 Installer `.github/workflows/`-এ চারটি caller workflow বসায়। Monorepo-তে app-এর directory নির্দিষ্ট করুন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 Installer-এ Flutter SDK লাগে না। এটি git commit/push করে না, secrets তৈরি করে না, বা workflow run শুরু করে না। ফাইলগুলো দেখে তারপর commit/push করুন।
@@ -32,7 +32,7 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
 - `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
-- `--ref v1.8.1`: reusable workflow version pin; default `v1.8.1`
+- `--ref v1.8.2`: reusable workflow version pin; default `v1.8.2`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে
 
@@ -72,12 +72,49 @@ version: 1.2.3+4
 
 `web-preview.yml` push/PR-এ Flutter web build deploy করে। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়। এটি hot reload নয়; web support নেই এমন plugin-ও কাজ নাও করতে পারে.
 
+#### Branch delete হলে preview cleanup (v1.8.2+)
+
+প্রতিটি preview gh-pages-এ ৩০–৬০ MB জায়গা নেয় আর branch মুছে গেলেও folder পড়ে থাকে। তাই `web-preview.yml`-এর install করা version-এ `delete` trigger সহ দুটি job থাকে: `preview` (push/PR) আর `cleanup` (branch delete)। Branch মুছে ফেললে `preview/<branch>` folder-টা gh-pages থেকে চলে যায়, ফলে gh-pages অকারণে বাড়ে না।
+
+কেন দুটো job একই ফাইলে: `delete` event শুধু সেই repository-তেই fire করে যেখানে branch-টা ছিল, আর delete-triggered workflow সবসময় **default branch** থেকে চলে — তাই `cleanup` job caller ফাইলেই থাকতে হবে এবং merge হওয়ার পরেই কাজ করবে।
+
+Reusable workflow-টা আলাদাভাবে ব্যবহার করতে চাইলে (installer ছাড়া):
+
+```yaml
+name: Web preview + cleanup
+on:
+  push:
+  pull_request:
+  delete:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  preview:
+    if: github.event_name != 'delete'
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.2
+    with:
+      working-directory: "."
+      comment-on-pr: true
+    secrets: inherit
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.2
+    permissions:
+      contents: write
+```
+
+Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে।
+
 ## Reusable workflow নিজে যোগ করা
 
 Installer ব্যবহার না করলে `examples/project-workflows/` থেকে দরকারি YAML app repository-র `.github/workflows/`-এ কপি করুন। Production ব্যবহারে reusable workflow-গুলোকে version tag-এ pin করুন, যেমন:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
 ```
 
 `@main` development-এর জন্য চললেও release workflow-তে version tag বা commit SHA বেশি নির্ভরযোগ্য।
