@@ -21,6 +21,9 @@ name: Reusable Web Preview
 # - Each branch gets its own directory (preview/<branch>), so several previews
 #   can coexist. Old hashed assets linger in that directory between pushes;
 #   harmless, but if that bothers you, delete the directory on gh-pages.
+# - `set-about-link: true` keeps the repository's About -> Website link on the
+#   preview of the default branch (see the README). Off by default because it
+#   needs a credential with administration: write, which GITHUB_TOKEN is not.
 # - The release web deploy in flutter-build.yml (deploy-web-pages) publishes
 #   to the Pages root and wipes other files. If a caller uses both, a release
 #   web deploy removes preview/<branch> directories until the next push
@@ -54,6 +57,33 @@ on:
         required: false
         type: boolean
         default: true
+      set-about-link:
+        description: Point the repository's About -> Website link at the preview (needs an admin credential)
+        required: false
+        type: boolean
+        default: false
+      about-link-url:
+        description: URL for the About link (empty = the preview URL of this run)
+        required: false
+        type: string
+        default: ""
+      about-link-overwrite:
+        description: Replace an About link that already points somewhere else
+        required: false
+        type: boolean
+        default: false
+      app-id:
+        description: GitHub App id used to mint an admin token for the About link
+        required: false
+        type: string
+        default: ""
+    secrets:
+      ABOUT_LINK_TOKEN:
+        description: Fine-grained PAT with Administration write, used for the About link
+        required: false
+      APP_PRIVATE_KEY:
+        description: Private key of the GitHub App named by app-id, used for the About link
+        required: false
     outputs:
       preview-url:
         description: Browser URL of the deployed preview
@@ -185,3 +215,139 @@ jobs:
                 body,
               });
             }
+
+  # Keeps the repository's About -> Website link on the preview, so the project
+  # page and the app both lead to a place where the app can be tried in a
+  # browser. Opt-in (`set-about-link: true`) because it needs a credential with
+  # administration: write - GITHUB_TOKEN cannot edit repository settings. Either
+  # a GitHub App (`app-id` input + APP_PRIVATE_KEY secret) or a fine-grained PAT
+  # (ABOUT_LINK_TOKEN secret) with Administration: write on this repository.
+  about-link:
+    name: About link
+    if: >-
+      inputs.set-about-link &&
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve the About-link credential
+        id: credentials
+        env:
+          APP_ID_INPUT: ${{ inputs.app-id }}
+          HAS_APP_KEY: ${{ secrets.APP_PRIVATE_KEY != '' }}
+          HAS_TOKEN: ${{ secrets.ABOUT_LINK_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+
+          source=none
+          if [ -n "$APP_ID_INPUT" ] && [ "$HAS_APP_KEY" = "true" ]; then
+            source=app
+          elif [ "$HAS_TOKEN" = "true" ]; then
+            source=token
+          fi
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+
+          case "$source" in
+            app)
+              echo "Using GitHub App ${APP_ID_INPUT} to set the About link."
+              ;;
+            token)
+              echo "Using the ABOUT_LINK_TOKEN secret to set the About link."
+              ;;
+            *)
+              echo "The About link was left alone: no credential found."
+              echo "::notice::Add the APP_PRIVATE_KEY secret and the app-id input, or an ABOUT_LINK_TOKEN secret with Administration: write, to keep the About link on the preview."
+              {
+                echo "### About link"
+                echo ""
+                echo "No credential found, so the About link was left alone. See \"About -> Website link\" in the README."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+      - name: Create an installation token for the app
+        id: app-token
+        if: steps.credentials.outputs.source == 'app'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Point the About link at the preview
+        if: steps.credentials.outputs.source != 'none'
+        env:
+          GH_TOKEN: ${{ steps.credentials.outputs.source == 'app' && steps.app-token.outputs.token || secrets.ABOUT_LINK_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_URL: ${{ inputs.about-link-url != '' && inputs.about-link-url || needs.preview.outputs.preview-url }}
+          OVERWRITE: ${{ inputs.about-link-overwrite }}
+        run: |
+          set -euo pipefail
+
+          # Attempts and the pause between them are env knobs so the self-test can
+          # run this exact script without the real waiting.
+          attempts="${ABOUT_LINK_ATTEMPTS:-6}"
+          retry_seconds="${ABOUT_LINK_RETRY_SECONDS:-5}"
+
+          if [ -z "${TARGET_URL:-}" ]; then
+            echo "::warning::No preview URL to point the About link at, so nothing was changed."
+            exit 0
+          fi
+
+          # The Pages deployment needs a moment before the URL answers.
+          live=false
+          for attempt in $(seq 1 "$attempts"); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 20 "$TARGET_URL" || true)"
+            if [ "$code" = "200" ]; then
+              live=true
+              break
+            fi
+            echo "Attempt ${attempt}/${attempts}: ${TARGET_URL} answered ${code:-nothing}. Retrying."
+            sleep "$((attempt * retry_seconds))"
+          done
+          if [ "$live" != "true" ]; then
+            echo "::warning::${TARGET_URL} did not answer 200, so the About link was left alone."
+            {
+              echo "### About link"
+              echo ""
+              echo "\`${TARGET_URL}\` is not live yet, so the About link was left alone."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          current="$(gh api "/repos/${REPOSITORY}" --jq '.homepage // ""')"
+          if [ "$current" = "$TARGET_URL" ]; then
+            echo "The About link already points at ${TARGET_URL}."
+            {
+              echo "### About link"
+              echo ""
+              echo "Already points at \`${TARGET_URL}\`; nothing to change."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Never silently throw away a real website that the owner put there.
+          if [ -n "$current" ] && [ "$OVERWRITE" != "true" ]; then
+            echo "::warning::The About link already points at ${current}; leaving it alone. Set about-link-overwrite: true to replace it."
+            {
+              echo "### About link"
+              echo ""
+              echo "Left \`${current}\` alone; set \`about-link-overwrite: true\` if the preview should replace it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh api --method PATCH "/repos/${REPOSITORY}" -f "homepage=${TARGET_URL}" > /dev/null
+          updated="$(gh api "/repos/${REPOSITORY}" --jq '.homepage // ""')"
+          if [ "$updated" != "$TARGET_URL" ]; then
+            echo "::error::The About link is still ${updated:-empty} after the update."
+            exit 1
+          fi
+
+          echo "About link: ${current:-empty} -> ${TARGET_URL}"
+          {
+            echo "### About link"
+            echo ""
+            echo "Updated from \`${current:-empty}\` to \`${TARGET_URL}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
