@@ -13,6 +13,7 @@
 - Safety net: test ad ID / `com.example` detection, versionCode bump check, `apksigner` verification
 - Web build + GitHub Pages deploy
 - Web preview: প্রতিটি push/PR-এ branch-অনুযায়ী GitHub Pages URL — APK install না করেই browser-এ app test
+- Web preview cleanup: branch delete হলে তার preview ফোল্ডার `gh-pages` থেকে সরে যায় (v1.8.2+), তাই মরা branch-এর bundle জমতে থাকে না
 - `build_runner` / `gen-l10n` code generation, `.fvmrc` pinning, extra Flutter channel matrix
 - Play Store track upload + Firebase App Distribution
 - সুন্দর structured English release notes তৈরি
@@ -35,15 +36,15 @@ my-second-app (আলাদা repository)
 └── Flutter source + একই caller workflow
 ```
 
-## এক কমান্ডে setup (v1.8.1)
+## এক কমান্ডে setup (v1.8.2)
 
 GitHub-এ host করা Flutter project-এর directory থেকে **Linux / macOS / Windows Git Bash**-এ চালান (Bash ও curl লাগে; Flutter SDK installer-এর জন্য লাগে না):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
 ```
 
-Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ পাঁচটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.8.1`** tag-এ reusable builder pin করে:
+Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে নিজে working directory নির্ধারণ করে। Git repository থাকলে **repo root**-এর `.github/workflows/`-এ পাঁচটি ছোট caller বসায়; Git না থাকলে বর্তমান directory-কে root ধরে। এগুলো একই **`@v1.8.2`** tag-এ reusable builder pin করে:
 
 | ফাইল | কখন চলে |
 |---|---|
@@ -51,12 +52,12 @@ Script app-এর `pubspec.yaml` (dependency `sdk: flutter`) খুঁজে ন
 | `manual-build.yml` | Actions থেকে ম্যানুয়ালি APK বা AAB |
 | `publish-release.yml` | Actions থেকে ম্যানুয়ালি signed APK/AAB + GitHub Release |
 | `release.yml` | `v*` tag push হলে শুধু signed AAB artifact; GitHub Release নয় |
-| `web-preview.yml` | সব branch-এর push / PR: web build করে GitHub Pages-এ বসায় — browser-এ URL খুলেই test, APK নয় |
+| `web-preview.yml` | সব branch-এর push / PR: web build করে GitHub Pages-এ বসায় — browser-এ URL খুলেই test, APK নয়; branch delete হলে সেই preview-ও মুছে যায় (v1.8.2+) |
 
 **Monorepo-তে একাধিক Flutter app থাকলে** ইচ্ছামতো একটি বেছে দিন (path repo root থেকে):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 একাধিক app পেলে script আন্দাজ করে ভুলটা বেছে নেবে না; `--app-dir` চাইবে। `--app-name` না দিলে release title-এ `pubspec.yaml`-এর নাম ব্যবহার হয়। `--ref v1.4.0` দিয়ে পুরোনো tested version pin করা যায়; সাধারণত default tag-ই রাখুন। আগে কী লিখবে দেখতে `--dry-run` দিন।
@@ -71,13 +72,13 @@ Remote shell script চালানোর আগে review করতে চা�
 
 ### ধাপ ১: Stable builder version ব্যবহার করুন
 
-App project-এর caller workflow-তে tested tag pin করুন (`v1.8.1` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
+App project-এর caller workflow-তে tested tag pin করুন (`v1.8.2` = installer + wrapper `publish-release.yml` + `flutter-build.yml` একই pin):
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
 ```
 
-Release publish করার জন্য `publish-release.yml@v1.8.1` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
+Release publish করার জন্য `publish-release.yml@v1.8.2` ব্যবহার করলেই চলবে — সেটা ভেতরে `flutter-build.yml`-এর সেই একই ট্যাগ-পিন করা কল করে, তাই দুটো কখনো একে অপরের সাথে মিল না খেয়ে ফেলে থাকে না।
 
 Development-এর সময় `@main` ব্যবহার করা গেলেও production release-এর জন্য exact version tag বা commit SHA ব্যবহার করা নিরাপদ।
 
@@ -141,7 +142,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.2
     with:
       app-name: SpeakEasy
       release-draft: ${{ inputs.draft }}
@@ -261,7 +262,7 @@ Firebase config লেখার পরে, তাই সে exactly সেই tr
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.2
     with:
       app-name: KeepIt
       working-directory: flutter_app
@@ -315,6 +316,37 @@ https://<username>.github.io/<repo>/preview/main/
   দেয়, তাই ওটা চালালে preview মুছে যায় — পরের push-এ আবার ফিরে আসে।
 - Caller-এ `comment-on-pr: false` দিলে PR comment বন্ধ।
 
+### Branch delete হলে preview cleanup (v1.8.2+)
+
+প্রতিটি branch-এর preview ৩০–৬০ MB নেয়, তাই branch মিটে গেলে সেটা `gh-pages`-এ পড়ে থাকার দরকার নেই।
+v1.8.2 থেকে installer `web-preview.yml` caller-এর ভেতরেই একটি cleanup job বসায় — আলাদা ফাইল লাগে না:
+
+```yaml
+on:
+  push:
+  pull_request:
+  delete:                                     # নতুন যোগ করুন
+
+jobs:
+  preview:
+    if: github.event_name != 'delete'         # delete-এ build হবে না
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.2
+    secrets: inherit
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.2
+    permissions:
+      contents: write
+```
+
+জেনে রাখুন:
+
+- GitHub `delete` event-এর workflow **default branch** থেকে চালায় — তাই caller merge করার পরেই branch মোছার সুবিধা পাবেন।
+- যে branch-এর preview নেই সেখানে কিছুই হয় না (no-op, failure নয়)।
+- `keep-branches` (default `main,master`) কখনো ছোঁয়া হয় না, আর tag delete হলে ignore হয়।
+- deploy-এ custom `destination-dir` দিলে cleanup-এও সেটাই দিতে হবে।
+- কত ফাইল সরল, কত জায়গা ছাড়লো — Run-এর Step summary-তে লেখা থাকে।
+
 ## Build-time configuration (AdMob ID, API base URL ইত্যাদি)
 
 Release build-এ যে মানগুলো compile-time-এ ঢোকাতে হয় — যেমন আসল AdMob ID — সেগুলো caller workflow-এর `dart-defines` input-এ দিন, প্রতি লাইনে একটি `KEY=VALUE`। প্রতিটি লাইন `flutter build apk/appbundle`-এ `--dart-define=KEY=VALUE` হয়ে যায়; খালি value দিলে সেই key skip হয় এবং app-এর নিজের default (যেমন Google-এর test ad unit) বহাল থাকে।
@@ -324,7 +356,7 @@ Gradle/`AndroidManifest.xml`-এর placeholder-এর মতো যে মা�
 ```yaml
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.2
     with:
       app-name: QuizBaaz
       dart-defines: |
@@ -395,7 +427,7 @@ v1.4.0-এ builder-টা শুধু build করেই থেমে থাক
 ```yaml
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
     with:
       working-directory: flutter_app
       code-coverage: true
@@ -553,7 +585,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
     with:
       working-directory: apps/mobile
       generate-android-platform: true
@@ -592,7 +624,7 @@ wrapper (`publish-release.yml`) ভেতরে `flutter-build.yml`-কে ন�
 Projectগুলো exact tag দিয়ে pin করতে পারে:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.1
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
 ```
 
 ## প্রয়োজনীয় GitHub Secrets

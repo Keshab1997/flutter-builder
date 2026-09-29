@@ -3,7 +3,7 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.8.1
+DEFAULT_REF=v1.8.2
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
 FILES=(ci.yml manual-build.yml publish-release.yml release.yml web-preview.yml)
 
@@ -15,20 +15,21 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.1/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
   --app-name NAME   Display name for GitHub Releases (default: pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.1)
+  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.2)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first
   -h, --help        Show this help
 
 Options over a pipe: curl -fsSL URL | bash -s -- --app-dir apps/mobile --app-name "My App"
 Installs ci.yml, manual-build.yml, publish-release.yml, release.yml and web-preview.yml into
-.github/workflows/ at the Git repository root. Never adds GitHub secrets or
-pushes code. Only --force may replace an existing workflow.
+.github/workflows/ at the Git repository root. web-preview.yml also deletes a
+branch's preview from gh-pages when that branch is deleted. Never adds GitHub
+secrets or pushes code. Only --force may replace an existing workflow.
 HELP
 }
 
@@ -299,9 +300,15 @@ name: Web Preview
 # Build and deployment -> Deploy from a branch -> gh-pages (root); the first
 # run creates the branch. Needs the web platform (flutter create --platforms
 # web .); plugins without web support will not work in the preview.
+#
+# Deleting a branch also removes its preview again (the cleanup job below runs
+# on the `delete` event), so gh-pages does not keep a bundle per dead branch.
+# GitHub runs delete-triggered workflows from the default branch, so merge this
+# file before relying on that.
 on:
   push:
   pull_request:
+  delete:
 
 permissions:
   contents: write
@@ -313,6 +320,7 @@ concurrency:
 
 jobs:
   preview:
+    if: github.event_name != 'delete'
 YAML
   printf '    uses: %s/web-preview.yml@%s\n' "$REUSABLE" "$ref"
   cat <<'YAML'
@@ -322,6 +330,14 @@ YAML
   cat <<'YAML'
       comment-on-pr: true
     secrets: inherit
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+YAML
+  printf '    uses: %s/preview-cleanup.yml@%s\n' "$REUSABLE" "$ref"
+  cat <<'YAML'
+    permissions:
+      contents: write
 YAML
 } > "$stage/web-preview.yml"
 

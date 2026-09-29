@@ -1,0 +1,242 @@
+name: Reusable Flutter Web Preview Cleanup
+
+# Removes the preview/<branch> directory from the Pages branch after a branch
+# is deleted, so gh-pages does not keep a whole web bundle (often 40-60 MB) for
+# every branch that ever had a preview. Pair it with web-preview.yml; both
+# compute the directory the same way, so cleanup always finds the deploy's
+# folder (tests/test_preview_cleanup.py fails if those two ever drift apart).
+#
+# A `delete` event only fires in the repository that owns the branch, so the
+# caller has to pass it on. Recommended caller - the same file as the preview
+# job, split by event name (see examples/project-workflows/web-preview.yml):
+#
+#   on:
+#     push:
+#     pull_request:
+#     delete:
+#
+#   jobs:
+#     preview:
+#       if: github.event_name != 'delete'
+#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.2
+#     cleanup:
+#       if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.2
+#       permissions:
+#         contents: write
+#
+# Notes:
+# - GitHub runs delete-triggered workflows from the default branch, so merge the
+#   caller before expecting cleanup after a branch deletion.
+# - Nothing happens when the preview directory does not exist: deleting a branch
+#   that never had a preview is a no-op, not a failure.
+# - Branches listed in keep-branches (main, master by default) are never touched.
+# - Deleting a *tag* is ignored.
+# - A custom `destination-dir` on the deploy side must be passed here as well,
+#   otherwise cleanup looks for preview/<branch>.
+
+on:
+  workflow_call:
+    inputs:
+      branch-name:
+        description: Deleted branch to clean up (empty = read the caller's event)
+        required: false
+        type: string
+        default: ""
+      pages-branch:
+        description: Branch that holds the published previews
+        required: false
+        type: string
+        default: gh-pages
+      preview-directory:
+        description: Directory on the pages branch holding the per-branch previews
+        required: false
+        type: string
+        default: preview
+      destination-dir:
+        description: Exact directory to remove (empty = <preview-directory>/<branch>)
+        required: false
+        type: string
+        default: ""
+      keep-branches:
+        description: Comma-separated branches whose previews are never removed
+        required: false
+        type: string
+        default: "main,master"
+      dry-run:
+        description: Report what would be removed and push nothing
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      branch:
+        description: Branch this run resolved (empty when skipped)
+        value: ${{ jobs.cleanup.outputs.branch }}
+      directory:
+        description: Directory that was removed (empty when skipped)
+        value: ${{ jobs.cleanup.outputs.directory }}
+      removed:
+        description: '"true" when a preview directory was removed and pushed'
+        value: ${{ jobs.cleanup.outputs.removed }}
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      branch: ${{ steps.resolve.outputs.branch }}
+      directory: ${{ steps.resolve.outputs.directory }}
+      removed: ${{ steps.remove.outputs.removed }}
+    steps:
+      - name: Resolve the deleted branch and its preview directory
+        id: resolve
+        env:
+          INPUT_BRANCH: ${{ inputs.branch-name }}
+          PREVIEW_DIRECTORY: ${{ inputs.preview-directory }}
+          DESTINATION_DIR: ${{ inputs.destination-dir }}
+          KEEP_BRANCHES: ${{ inputs.keep-branches }}
+          PAGES_BRANCH: ${{ inputs.pages-branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          branch="$INPUT_BRANCH"
+          ref_type=""
+          if [ -f "$EVENT_PATH" ]; then
+            [ -n "$branch" ] || branch="$(jq -r '.ref // empty' "$EVENT_PATH")"
+            ref_type="$(jq -r '.ref_type // empty' "$EVENT_PATH")"
+          fi
+          [ -n "$branch" ] || branch="$REF_NAME"
+          branch="${branch#refs/heads/}"
+          branch="${branch#refs/tags/}"
+
+          skip() {
+            {
+              echo "skip=true"
+              echo "reason=$1"
+              echo "branch="
+              echo "directory="
+            } >> "$GITHUB_OUTPUT"
+            echo "Skipped: $1"
+          }
+
+          if [ "$EVENT_NAME" = "delete" ] && [ -n "$ref_type" ] && [ "$ref_type" != "branch" ]; then
+            skip "the deleted ref was a $ref_type, not a branch"
+            exit 0
+          fi
+          if [ -z "$branch" ] || [ "$branch" = "null" ]; then
+            skip "no branch name in this event"
+            exit 0
+          fi
+          if [ "$branch" = "$PAGES_BRANCH" ]; then
+            skip "$branch is the pages branch itself"
+            exit 0
+          fi
+          case ",$(printf '%s' "$KEEP_BRANCHES" | tr -d ' ')," in
+            *",$branch,"*)
+              skip "$branch is listed in keep-branches ($KEEP_BRANCHES)"
+              exit 0
+              ;;
+          esac
+
+          # Same sanitising as the preview deploy: keep the two in step.
+          slug="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
+          [ -n "$slug" ] || slug="branch"
+          directory="${DESTINATION_DIR:-${PREVIEW_DIRECTORY}/${slug}}"
+          directory="${directory%/}"
+
+          case "$directory" in
+            ""|"."|".."|"/"|/*|../*|*/../*)
+              echo "::error::Refusing to remove '$directory' from the pages branch."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "skip=false"
+            echo "branch=$branch"
+            echo "directory=$directory"
+          } >> "$GITHUB_OUTPUT"
+          echo "Deleted branch: $branch"
+          echo "Preview directory: $directory"
+
+      - name: Check out the pages branch
+        id: pages
+        if: steps.resolve.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.pages-branch }}
+          fetch-depth: 1
+
+      - name: No pages branch, so nothing to remove
+        if: steps.resolve.outputs.skip != 'true' && steps.pages.outcome != 'success'
+        env:
+          BRANCH: ${{ steps.resolve.outputs.branch }}
+          PAGES_BRANCH: ${{ inputs.pages-branch }}
+        run: |
+          {
+            echo "### Web preview cleanup"
+            echo ""
+            echo "Branch \`$BRANCH\` was deleted, but the \`$PAGES_BRANCH\` branch does not exist, so there is nothing to remove."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the preview directory
+        id: remove
+        if: steps.pages.outcome == 'success'
+        env:
+          BRANCH: ${{ steps.resolve.outputs.branch }}
+          DIRECTORY: ${{ steps.resolve.outputs.directory }}
+          PAGES_BRANCH: ${{ inputs.pages-branch }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -e "$DIRECTORY" ]; then
+            echo "removed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Web preview cleanup"
+              echo ""
+              echo "Branch \`$BRANCH\` was deleted; \`$DIRECTORY\` is not on \`$PAGES_BRANCH\`, so nothing was removed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          files="$(find "$DIRECTORY" -type f | wc -l | tr -d ' ')"
+          size="$(du -sh "$DIRECTORY" | awk '{print $1}')"
+
+          git rm -r --quiet --ignore-unmatch "$DIRECTORY"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "removed=false" >> "$GITHUB_OUTPUT"
+            echo "Branch \`$BRANCH\`: nothing staged, already clean." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+            git reset --hard --quiet
+            echo "removed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Web preview cleanup (dry run)"
+              echo ""
+              echo "Would remove \`$DIRECTORY\` ($files files, $size) for branch \`$BRANCH\`; nothing was pushed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "chore(pages): remove preview for deleted branch ${BRANCH}"
+          git push --quiet origin "HEAD:${PAGES_BRANCH}"
+
+          echo "removed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Web preview cleanup"
+            echo ""
+            echo "Branch \`$BRANCH\` was deleted, so \`$DIRECTORY\` ($files files, $size) was removed from \`$PAGES_BRANCH\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Removed $DIRECTORY ($files files, $size) from $PAGES_BRANCH"
