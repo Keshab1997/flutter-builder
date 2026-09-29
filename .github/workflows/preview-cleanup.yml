@@ -18,10 +18,10 @@ name: Reusable Flutter Web Preview Cleanup
 #   jobs:
 #     preview:
 #       if: github.event_name != 'delete'
-#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.5
+#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.6
 #     cleanup:
 #       if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.5
+#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.6
 #       permissions:
 #         contents: write
 #
