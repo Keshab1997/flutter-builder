@@ -17,13 +17,13 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 GitHub-এ থাকা Flutter app-এর directory থেকে Linux, macOS বা Windows Git Bash-এ চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.4/scripts/install.sh | bash
 ```
 
 Installer `.github/workflows/`-এ চারটি caller workflow বসায়। Monorepo-তে app-এর directory নির্দিষ্ট করুন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.4/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 Installer-এ Flutter SDK লাগে না। এটি git commit/push করে না, secrets তৈরি করে না, বা workflow run শুরু করে না। ফাইলগুলো দেখে তারপর commit/push করুন।
@@ -32,7 +32,7 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
 - `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
-- `--ref v1.8.2`: reusable workflow version pin; default `v1.8.2`
+- `--ref v1.8.4`: reusable workflow version pin; default `v1.8.4`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে
 
@@ -91,10 +91,15 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  # একটাই gh-pages, তাই একটাই lane: deploy আর cleanup কখনো একসাথে push করে না।
+  group: web-preview
+  cancel-in-progress: false
+
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.2
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.4
     with:
       working-directory: "."
       comment-on-pr: true
@@ -102,19 +107,19 @@ jobs:
 
   cleanup:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.2
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.4
     permissions:
       contents: write
 ```
 
-Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে।
+Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে। সব preview একটাই concurrency lane-এ (`group: web-preview`) চলে, কারণ gh-pages একটাই: deploy action compare-and-swap দিয়ে push করে, তাই দুই রান একসাথে লিখলে একটা reject হয় — আর branch update করলেই push ও pull_request দুটো ইভেন্ট একসাথে চলে, ফলে collision সহজ। Queue করার ফলে delete-এর cleanup কোনো চলমান deploy বাতিল করে না; reject হলে cleanup fetch + rebase করে ৫ বার চেষ্টা করে। এই ফিক্সগুলো **v1.8.4**-এ আছে।
 
 ## Reusable workflow নিজে যোগ করা
 
 Installer ব্যবহার না করলে `examples/project-workflows/` থেকে দরকারি YAML app repository-র `.github/workflows/`-এ কপি করুন। Production ব্যবহারে reusable workflow-গুলোকে version tag-এ pin করুন, যেমন:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.2
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.4
 ```
 
 `@main` development-এর জন্য চললেও release workflow-তে version tag বা commit SHA বেশি নির্ভরযোগ্য।

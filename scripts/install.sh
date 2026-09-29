@@ -3,7 +3,7 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.8.2
+DEFAULT_REF=v1.8.4
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
 FILES=(ci.yml manual-build.yml publish-release.yml web-preview.yml)
 
@@ -15,12 +15,12 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.4/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
   --app-name NAME   Display name for GitHub Releases (default: pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.2)
+  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.4)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first
   -h, --help        Show this help
@@ -274,9 +274,16 @@ permissions:
   contents: write
   pull-requests: write
 
+# All previews of one repository share a single lane, because they share one
+# gh-pages branch. Every writer runs alone: the deploy action pushes with a
+# compare-and-swap and refuses a push when another run moved the branch in the
+# meantime ("cannot lock ref ... is expected"), and updating a branch that has an
+# open pull request fires a push run and a pull_request run at the same time.
+# Queueing also keeps a deleted branch's cleanup from cancelling, or being
+# cancelled by, the deploy of the default branch.
 concurrency:
-  group: web-preview-${{ github.ref }}
-  cancel-in-progress: true
+  group: web-preview
+  cancel-in-progress: false
 
 jobs:
   preview:
