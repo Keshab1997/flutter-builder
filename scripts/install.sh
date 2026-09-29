@@ -3,7 +3,7 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.8.2
+DEFAULT_REF=v1.8.3
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
 FILES=(ci.yml manual-build.yml publish-release.yml release.yml web-preview.yml)
 
@@ -15,12 +15,12 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.2/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.3/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
   --app-name NAME   Display name for GitHub Releases (default: pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.2)
+  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.3)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first
   -h, --help        Show this help
@@ -315,8 +315,12 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: web-preview-${{ github.ref }}
-  cancel-in-progress: true
+  # One lane per event and ref. A delete event carries the *default* branch in
+  # github.ref, so without the event name a deleted branch would cancel the
+  # preview deploy of the default branch, and a second deletion would cancel the
+  # first cleanup. Deletions queue instead of cancelling.
+  group: web-preview-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'delete' }}
 
 jobs:
   preview:

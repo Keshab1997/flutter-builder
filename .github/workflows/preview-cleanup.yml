@@ -231,7 +231,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit --quiet -m "chore(pages): remove preview for deleted branch ${BRANCH}"
-          git push --quiet origin "HEAD:${PAGES_BRANCH}"
+
+          # A preview deploy can be writing to the pages branch at the same
+          # moment: merging a pull request and deleting its branch happens in
+          # one go. The deploy pushes at the very end of its run, so a rejected
+          # push here is rare but not impossible. Fetch and replay the removal on
+          # top of whatever landed first instead of failing the cleanup.
+          for attempt in 1 2 3 4 5; do
+            if git push --quiet origin "HEAD:${PAGES_BRANCH}"; then
+              break
+            fi
+            if [ "$attempt" -ge 5 ]; then
+              echo "::error::Could not push the removal of ${DIRECTORY} to ${PAGES_BRANCH} after 5 attempts."
+              exit 1
+            fi
+            echo "Push attempt ${attempt} was rejected; another run is writing to ${PAGES_BRANCH}. Fetching and retrying."
+            git fetch --quiet origin "${PAGES_BRANCH}"
+            if ! git rebase --quiet "origin/${PAGES_BRANCH}"; then
+              git rebase --abort || true
+              echo "::error::Could not replay the removal of ${DIRECTORY} on top of ${PAGES_BRANCH}."
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
 
           echo "removed=true" >> "$GITHUB_OUTPUT"
           {

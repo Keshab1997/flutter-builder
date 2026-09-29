@@ -137,6 +137,37 @@ class PreviewCleanupTests(unittest.TestCase):
             f"the example mixes reusable workflow pins: {sorted(refs)}",
         )
 
+    def test_push_is_retried_when_a_preview_deploy_writes_at_the_same_time(self) -> None:
+        """Merging a PR and deleting its branch fire a deploy and a cleanup together.
+
+        The deploy publishes at the very end of its run, so a rejected push here
+        must be replayed on top of the pages branch instead of failing the run.
+        """
+        text = CLEANUP.read_text(encoding="utf-8")
+        self.assertIn("for attempt in 1 2 3 4 5; do", text)
+        self.assertIn('git fetch --quiet origin "${PAGES_BRANCH}"', text)
+        self.assertIn('git rebase --quiet "origin/${PAGES_BRANCH}"', text)
+        self.assertIn("git rebase --abort", text)
+        self.assertIn("::error::Could not push the removal", text)
+        # A retry loop is pointless if the push still runs outside of it.
+        self.assertEqual(text.count("git push --quiet"), 1)
+
+    def test_caller_gives_deletions_their_own_concurrency_lane(self) -> None:
+        """A delete event carries the default branch in github.ref.
+
+        Sharing the preview lane would let a branch deletion cancel the default
+        branch's preview deploy, and a second deletion cancel the first cleanup.
+        """
+        example = EXAMPLE.read_text(encoding="utf-8")
+        self.assertIn(
+            "group: web-preview-${{ github.event_name }}-${{ github.ref }}", example
+        )
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name != 'delete' }}", example
+        )
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn("web-preview-${{ github.event_name }}-${{ github.ref }}", installer)
+
     def test_installer_ships_the_cleanup_job_and_the_same_pin(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")
         self.assertIn("preview-cleanup.yml@%s", installer)
