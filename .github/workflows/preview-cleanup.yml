@@ -101,6 +101,7 @@ jobs:
           PAGES_BRANCH: ${{ inputs.pages-branch }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PATH: ${{ github.event_path }}
+          EVENT_REF: ${{ github.event.ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -111,7 +112,14 @@ jobs:
             [ -n "$branch" ] || branch="$(jq -r '.ref // empty' "$EVENT_PATH")"
             ref_type="$(jq -r '.ref_type // empty' "$EVENT_PATH")"
           fi
+          # A delete event left EVENT_PATH unreadable inside a called workflow,
+          # so the caller passes the deleted ref explicitly (branch-name) and the
+          # event context is the second source. github.ref_name must never be used
+          # for a delete event: there it is the *default* branch, which matches
+          # keep-branches and turns the cleanup into a silent no-op.
+          [ -n "$branch" ] || branch="$EVENT_REF"
           [ -n "$branch" ] || branch="$REF_NAME"
+          raw_branch="$branch"
           branch="${branch#refs/heads/}"
           branch="${branch#refs/tags/}"
 
@@ -129,9 +137,21 @@ jobs:
             skip "the deleted ref was a $ref_type, not a branch"
             exit 0
           fi
+          # The payload can be unreadable (see below), so the ref prefix is the
+          # second way to tell a tag from a branch. Callers usually guard with
+          # github.event.ref_type == 'branch' as well.
+          case "$raw_branch" in
+            refs/tags/*)
+              skip "the deleted ref was a tag, not a branch"
+              exit 0
+              ;;
+          esac
           if [ -z "$branch" ] || [ "$branch" = "null" ]; then
             skip "no branch name in this event"
             exit 0
+          fi
+          if [ "$EVENT_NAME" = "delete" ] && [ "$branch" = "$REF_NAME" ]; then
+            echo "::warning::This delete event carried no deleted ref, so no preview was removed. Pass the deleted ref from the caller, e.g. branch-name: \${{ github.event.ref }}."
           fi
           if [ "$branch" = "$PAGES_BRANCH" ]; then
             skip "$branch is the pages branch itself"

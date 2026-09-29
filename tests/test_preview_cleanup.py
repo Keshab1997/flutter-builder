@@ -167,6 +167,38 @@ class PreviewCleanupTests(unittest.TestCase):
             self.assertIn("cancel-in-progress: false", text, path)
             self.assertNotIn("group: web-preview-${{", text, path)
 
+    def test_the_deleted_ref_never_comes_from_github_ref_name(self) -> None:
+        """A delete event reports the *default* branch in github.ref_name.
+
+        Using it turned the cleanup into a silent no-op: the deleted branch was
+        reported as "main", which sits in keep-branches, so nothing was removed.
+        The event payload is not readable inside the called workflow either, so
+        the caller hands the deleted ref over and the event context is the second
+        source; ref_name is only ever the last resort and warns when it is hit.
+        """
+        text = CLEANUP.read_text(encoding="utf-8")
+        sources = [
+            'branch="$INPUT_BRANCH"',
+            'branch="$EVENT_REF"',
+            'branch="$REF_NAME"',
+        ]
+        positions = [text.index(source) for source in sources]
+        self.assertEqual(
+            positions, sorted(positions), "the deleted ref is resolved out of order"
+        )
+        self.assertIn("EVENT_REF: ${{ github.event.ref }}", text)
+        self.assertIn("::warning::This delete event carried no deleted ref", text)
+        # A tag deletion must not be treated as a branch, even without a payload.
+        self.assertIn('case "$raw_branch" in', text)
+        self.assertIn("refs/tags/*)", text)
+        # Both the installer and the documented caller must pass the ref over.
+        for path in (EXAMPLE, INSTALLER):
+            self.assertIn(
+                "branch-name: ${{ github.event.ref }}",
+                path.read_text(encoding="utf-8"),
+                path,
+            )
+
     def test_installer_ships_the_cleanup_job_and_the_same_pin(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")
         self.assertIn("preview-cleanup.yml@%s", installer)
