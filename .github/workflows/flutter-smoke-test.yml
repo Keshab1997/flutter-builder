@@ -18,12 +18,14 @@ on:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
+      - .github/workflows/publish-release.yml
       - .github/workflows/web-preview.yml
   pull_request:
     paths:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
+      - .github/workflows/publish-release.yml
       - .github/workflows/web-preview.yml
   schedule:
     # Weekly, even when nothing changes here: catches upstream Flutter /
