@@ -71,9 +71,22 @@ Repository root-এ যা বসে:
 
 | ফাইল | কী করে |
 |---|---|
-| `tool/preflight.py` | Dart code-এ অব্যবহৃত private widget/function, অব্যবহৃত optional constructor parameter ও অব্যবহৃত import খুঁজে বের করে — খরচ ১ সেকেন্ড (SDK ছাড়া), অথচ ঠিক এই ভুলগুলোই push-কে লাল করে |
+| `tool/preflight.py` | Dart code-এ অব্যবহৃত private widget/function, অব্যবহৃত optional constructor parameter, অব্যবহৃত import, `print()` ছোঁয়া (avoid_print), একবারও ব্যবহার না হওয়া private field, orphan ফাইল ও একই নামের দুটো class একসাথে import — সব খুঁজে বের করে। খরচ ১ সেকেন্ড (SDK ছাড়া), অথচ ঠিক এই ভুলগুলোই push-কে লাল করে |
 | `tool/ci_watch.py` | commit-এর GitHub Actions run-গুলো নিজে থেকে watch করে; শেষ হলে প্রতিটা workflow-র ফল আর fail করা job-এর আসল error লাইন ছাপায় (token: `--token-file`, `$GITHUB_TOKEN`/`$GH_TOKEN`, বা `gh auth token`) |
+| `tool/agent_loop.py` | এক command-এ পুরো loop: preflight → secret guard → commit → push → CI watch। main-এ commit করা বা credential-এর মতো ফাইল (`keystore`, `.env`, `google-services.json`) stage করা **আগেই আটকে দেয়**, তাই agent ভুল করে একটা ধাপও বাদ দিতে পারে না |
 | `AGENTS.md` | agent-দের playbook: এক change = এক push loop, CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
+
+```bash
+python3 tool/preflight.py                                   # push-এর আগে, ১ সেকেন্ড
+python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+python3 tool/agent_loop.py -m "..." --amend                 # আগের commit ঠিক করা
+python3 tool/agent_loop.py -m "..." --draft-pr              # branch + draft PR (draft-এ CI চলে না)
+python3 tool/agent_loop.py -m "..." --ready                 # draft প্রস্তুত → CI শুরু
+python3 tool/agent_loop.py -m "..." --no-watch              # শুধু push
+```
+
+Exit code: `0` = push হয়েছে (আর watched হলে সব সবুজ), `1` = CI লাল বা push fail, `2` = কিছু বদলানোর আগেই আটকে দিয়েছে। `--amend` করলে push হয় `--force-with-lease` দিয়ে — কখনো খালি `--force` নয়।
+
 
 `AGENTS.md` সবসময় **merge** হয়, replace নয়: `flutter-builder:agent-pack:start/end` marker-এর ভিতরের অংশটুকু update হয়, বাইরের সব লাইন (আপনার নিজের project notes) অপরিবর্তিত থাকে; ফাইল না থাকলে নতুন করে তৈরি হয়। Options: `--dry-run`, `--force`, `--help`।
 
@@ -87,6 +100,18 @@ Repository root-এ যা বসে:
 - shared `flutter-build.yml`-এ নতুন input `skip-draft-prs` (default `true`) — চাইলে caller থেকে বন্ধ করা যায়
 
 আগে install করা project-এ এই আচরণ চাইলে caller-এর `on:`/`if:` অংশ hand-merge করুন বা `install.sh --force` (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
+
+## CI আরও দ্রুত — build cache (v1.10+)
+
+Flutter SDK আর pub cache আগেই ছিল; কিন্তু Android build-এ সময় যেত **Gradle**-এর পিছনে, যা ওই cache-এর আওতায় পড়ে না। এখন:
+
+- **Gradle dependency/wrapper cache** — `gradle/actions/setup-gradle@v4`; PR-এ শুধু পড়ে, main-এ লিখে (PR-গুলো যেন main-এর cache নষ্ট না করে)। সাধারণত **১–৩ মিনিট/রান** সাশ্রয়, তবে প্রথম রানটা ঠান্ডা — cache ভরে ওঠে main-এ একবার চালানোর পর।
+- **Gradle build cache + parallel + jvmargs** — `android/gradle.properties`-এ না থাকলে নিজেই যোগ করে; আপনার নিজের লেখা কোনো লাইন কখনো বদলায় না। `configuration-cache` ইচ্ছাকৃতভাবে **যোগ করা হয় না** (কিছু plugin combo-তে ভাঙে) — চাইলে নিজের ফাইলে দিন।
+- **`build_runner` output cache** — `codegen: build_runner` দিলে প্রতি রানে পূর্ণ codegen (৩০ সেকেন্ড–৩ মিনিট) না চালিয়ে `.dart_tool/build` reuse হয়; key হয় `pubspec.lock` + source hash, তাই পুরোনো generated code আটকে থাকার ঝুঁকি নেই।
+- **`--no-pub`** — `flutter pub get` রানে একবারই চলে; analyze/test/build আর implicit resolve করে না।
+- **`test-matrix` এখন PR-এ চলে না** (channel breakage ধরার lane main/nightly-তে যথেষ্ট) — চাইলে `test-matrix-on-pr: true`।
+
+নতুন inputs (সবগুলোই opt-in, আগের আচরণ অপরিবর্তিত): `format-paths` (default `.`), `test-concurrency` (default 0 = Flutter-এর নিজের সেটিং), `build-mode` (default `release`; `profile` দিলে device test অনেক দ্রুত, তবে কখনো publish করার জন্য নয়), `target-platform` (যেমন `android-arm64`), `test-matrix-on-pr` (default false)।
 
 ## Build ও release
 
@@ -235,8 +260,9 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 - `.github/workflows/publish-release.yml` — reusable signed release workflow
 - `.github/workflows/web-preview.yml` — reusable web preview deployment
 - `scripts/install.sh` — caller workflow installer
-- `scripts/install-agent-pack.sh` — `tool/preflight.py`, `tool/ci_watch.py` ও managed `AGENTS.md` block বসায় (SDK ছাড়া)
+- `scripts/install-agent-pack.sh` — `tool/preflight.py`, `tool/ci_watch.py`, `tool/agent_loop.py` ও managed `AGENTS.md` block বসায় (SDK ছাড়া)
 - `agent-pack/` — agent pack-এর canonical ফাইল, যা installer-এর ভিতরে embed করা (tests দুই কপি এক রাখে)
+- `scripts/sync-agent-pack.py` — canonical ফাইল আর installer-এর embedded কপি এক রাখে (`--check` দিলে শুধু জানায়); সবসময় `agent-pack/` edit করে এটা চালান
 - `scripts/doctor.sh` — app configuration checker
 - `examples/project-workflows/` — app repository-তে ব্যবহারের নমুনা workflow
 - `docs/` — signing ও secret setup নির্দেশিকা

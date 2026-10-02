@@ -9,7 +9,10 @@ name: Flutter smoke test
 #
 # The step order intentionally mirrors the reusable build job in
 # flutter-build.yml (pub get -> format -> analyze -> test -> APK), so keeping
-# the two in sync is a one-glance diff.
+# the two in sync is a one-glance diff. That includes the Gradle cache: it is
+# a dependency of the build job now, and an upstream change to
+# gradle/actions/setup-gradle (or to the runner image it expects) should fail
+# here, not inside a user's app repository.
 
 on:
   push:
@@ -97,15 +100,20 @@ jobs:
 
       - name: Analyze source code
         working-directory: ${{ env.SMOKE_APP_DIR }}
-        run: flutter analyze --fatal-infos
+        run: flutter analyze --no-pub --fatal-infos
 
       - name: Run tests
         working-directory: ${{ env.SMOKE_APP_DIR }}
-        run: flutter test
+        run: flutter test --no-pub
+
+      - name: Set up Gradle (dependency and wrapper cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Build debug APK
         working-directory: ${{ env.SMOKE_APP_DIR }}
-        run: flutter build apk --debug
+        run: flutter build apk --no-pub --debug
 
       - name: Verify the APK exists
         working-directory: ${{ env.SMOKE_APP_DIR }}

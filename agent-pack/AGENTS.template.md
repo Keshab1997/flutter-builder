@@ -19,6 +19,7 @@ result would not match CI (SDK pin, Android SDK, Firebase secrets). So:
 ```bash
 python3 tool/preflight.py     # before pushing: dead code / unused params / unused imports
 python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing lines
+python3 tool/agent_loop.py -m "fix(scope): what changed"   # all five steps, one call
 ```
 
 ## The fast loop — one change, one push, one CI round
@@ -38,6 +39,33 @@ python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing 
 
 Rules of thumb: ten 30-second pushes waste more time than one 3-minute CI run.
 Read the CI log before editing; guessing at a red build doubles the rounds.
+
+### The same loop as one command
+
+`tool/agent_loop.py` performs steps 2-5 in a single call, and stops before the
+first thing that would waste a run:
+
+```bash
+python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+python3 tool/agent_loop.py -m "fix(profile): drop the unused import" --amend
+python3 tool/agent_loop.py -m "feat(cv): add PDF export" --draft-pr
+python3 tool/agent_loop.py -m "..." --ready          # drafts run no CI: this starts it
+python3 tool/agent_loop.py -m "..." --no-watch       # push and return immediately
+```
+
+It refuses, before touching the repository, when
+
+- HEAD is the default branch (`main`/`master`) — use a branch, or `--allow-main`
+  when the project really works that way;
+- a staged file looks like a credential (`.env`, `*.jks`, `*.keystore`, `*.pem`,
+  `key.properties`, `google-services.json`, `secrets/**`, …) — a refusal costs
+  one edit, a leaked keystore costs a rotation;
+- `preflight.py` reports anything — use `--no-preflight` only when the findings
+  are deliberate.
+
+Exit codes: `0` pushed (and green when watched), `1` CI red or push failed,
+`2` refused before changing anything. An `--amend` push uses
+`--force-with-lease`, never a bare `--force`.
 
 ## What a push costs here (and why it is already cheap)
 

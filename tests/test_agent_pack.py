@@ -59,11 +59,27 @@ class PayloadParityTests(unittest.TestCase):
             (PACK / "ci_watch.py").read_text(encoding="utf-8"),
         )
 
+    def test_embedded_agent_loop_matches_agent_pack(self) -> None:
+        self.assertEqual(
+            extract_payload("AGENT_PACK_AGENT_LOOP_PY_EOF"),
+            (PACK / "agent_loop.py").read_text(encoding="utf-8"),
+        )
+
     def test_embedded_agents_template_matches_agent_pack(self) -> None:
         self.assertEqual(
             extract_payload("AGENT_PACK_AGENTS_MD_EOF"),
             (PACK / "AGENTS.template.md").read_text(encoding="utf-8"),
         )
+
+    def test_sync_helper_reports_the_payload_in_sync(self) -> None:
+        """scripts/sync-agent-pack.py is the only supported way to edit the
+        payload; if it reports drift the parity tests above are about to fail."""
+        result = subprocess.run(
+            ["python3", str(ROOT / "scripts" / "sync-agent-pack.py"), "--check"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("matches agent-pack/", result.stdout)
 
     def test_installer_carries_the_released_version(self) -> None:
         self.assertIn(f"PACK_VERSION={VERSION}", SCRIPT.read_text(encoding="utf-8"))
@@ -119,6 +135,10 @@ class InstallerTests(unittest.TestCase):
             (self.repo / "tool/ci_watch.py").read_text(encoding="utf-8"),
             (PACK / "ci_watch.py").read_text(encoding="utf-8"),
         )
+        self.assertEqual(
+            (self.repo / "tool/agent_loop.py").read_text(encoding="utf-8"),
+            (PACK / "agent_loop.py").read_text(encoding="utf-8"),
+        )
         agents = self.agents_md()
         self.assertTrue(agents.startswith("# AGENTS.md — demo_app"), agents[:80])
         self.assertEqual(agents.count(HED), 1)
@@ -137,20 +157,28 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertEqual(helptext.returncode, 0, helptext.stderr)
         self.assertIn("--token-file", helptext.stdout)
+        loop_help = subprocess.run(
+            ["python3", "tool/agent_loop.py", "--help"], cwd=self.repo,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(loop_help.returncode, 0, loop_help.stderr)
+        self.assertIn("--draft-pr", loop_help.stdout)
 
     def test_rerun_is_idempotent_and_changes_nothing(self) -> None:
         self.flutter_app()
         self.assert_success(self.run_installer())
         before = {
             name: (self.repo / name).read_text(encoding="utf-8")
-            for name in ("tool/preflight.py", "tool/ci_watch.py", "AGENTS.md")
+            for name in ("tool/preflight.py", "tool/ci_watch.py",
+                         "tool/agent_loop.py", "AGENTS.md")
         }
         second = self.run_installer()
         self.assert_success(second)
         self.assertIn("already installed; nothing changed", second.stdout)
         after = {
             name: (self.repo / name).read_text(encoding="utf-8")
-            for name in ("tool/preflight.py", "tool/ci_watch.py", "AGENTS.md")
+            for name in ("tool/preflight.py", "tool/ci_watch.py",
+                         "tool/agent_loop.py", "AGENTS.md")
         }
         self.assertEqual(before, after)
         self.assertFalse((self.repo / ".agent-pack-backups").exists())
@@ -160,6 +188,7 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer(piped=True)
         self.assert_success(result)
         self.assertTrue((self.repo / "tool/preflight.py").is_file())
+        self.assertTrue((self.repo / "tool/agent_loop.py").is_file())
         self.assertTrue((self.repo / "AGENTS.md").is_file())
 
     def test_existing_agents_md_keeps_its_content(self) -> None:
@@ -336,6 +365,98 @@ class PreflightToolTests(unittest.TestCase):
         ))
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("private class _Forgotten is never used", result.stdout)
+
+    def test_unused_import_alias_is_reported(self) -> None:
+        """Regression: the import checks used to run on text whose string
+        literals had been blanked, so `import '…' as alias;` could never match
+        and an unused alias was silently accepted."""
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            import 'package:flutter/material.dart' as mat;
+
+            class A {
+              void go() {}
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("import alias 'mat' is unused", result.stdout)
+
+    def test_print_in_lib_is_reported_but_not_in_test(self) -> None:
+        lib = self.run_preflight(textwrap.dedent(
+            """\
+            class A {
+              void go() {
+                print('debugging');
+              }
+            }
+            """
+        ))
+        self.assertEqual(lib.returncode, 1, lib.stdout)
+        self.assertIn("avoid_print", lib.stdout)
+
+        (self.root / "lib" / "sample.dart").unlink()
+        test_dir = self.root / "test"
+        test_dir.mkdir()
+        (test_dir / "a_test.dart").write_text(
+            "void main() {\n  print('a print in a test is normal');\n}\n",
+            encoding="utf-8")
+        quiet = subprocess.run(
+            ["python3", str(PACK / "preflight.py"), "test"],
+            cwd=self.root, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(quiet.returncode, 0, quiet.stdout + quiet.stderr)
+
+    def test_unused_private_field_is_reported(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class Tile {
+              final int _height = 40;
+              const Tile();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private member '_height' is declared but never used again",
+                      result.stdout)
+
+    def test_a_field_used_in_a_string_still_counts_as_used(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class Tile {
+              final int _height = 40;
+              const Tile();
+              String label() => 'height: $_height';
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_orphan_file_and_ambiguous_import_are_reported(self) -> None:
+        (self.root / "lib" / "home.dart").write_text(textwrap.dedent(
+            """\
+            import 'package:demo_app/header_a.dart';
+            import 'package:demo_app/header_b.dart';
+
+            class Home {
+              final Header header = Header();
+            }
+            """
+        ), encoding="utf-8")
+        (self.root / "lib" / "header_a.dart").write_text(
+            "class Header {\n  const Header();\n}\n", encoding="utf-8")
+        (self.root / "lib" / "header_b.dart").write_text(
+            "class Header {\n  const Header();\n}\n", encoding="utf-8")
+        (self.root / "lib" / "orphan.dart").write_text(
+            "class OrphanCard {\n  const OrphanCard();\n}\n", encoding="utf-8")
+        (self.root / "pubspec.yaml").write_text("name: demo_app\n", encoding="utf-8")
+        result = subprocess.run(
+            ["python3", str(PACK / "preflight.py")],
+            cwd=self.root, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("orphan file", result.stdout)
+        self.assertIn("ambiguous_import", result.stdout)
 
     def test_clean_file_passes(self) -> None:
         result = self.run_preflight(textwrap.dedent(
