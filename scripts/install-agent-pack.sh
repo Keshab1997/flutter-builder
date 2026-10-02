@@ -11,6 +11,10 @@
 #   tool/ci_watch.py     Waits for GitHub Actions on a commit and prints the
 #                        failing lines of the failed jobs. Standard library
 #                        only, no `gh` required.
+#   tool/agent_loop.py   One command for the whole loop: preflight, secret
+#                        guard, commit, push, watch. Refuses to commit on the
+#                        default branch or to stage a credential, so an agent
+#                        cannot skip a step by accident.
 #   AGENTS.md            A playbook for AI agents: the one-change/one-push
 #                        loop, the CI map, how to read CI cheaply, and the
 #                        rules to keep. The text between the
@@ -30,15 +34,16 @@ fail() { printf '[agent-pack] ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'HELP'
-Install the flutter-builder agent pack (tool/preflight.py, tool/ci_watch.py and
-a managed AGENTS.md block) into a Flutter repository. No Flutter SDK needed.
+Install the flutter-builder agent pack (tool/preflight.py, tool/ci_watch.py,
+tool/agent_loop.py and a managed AGENTS.md block) into a Flutter repository.
+No Flutter SDK needed.
 
 Run from anywhere inside the repository:
   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.1/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything
-  --force     Replace differing tool/preflight.py or tool/ci_watch.py
+  --force     Replace any differing tool/*.py from the pack
               (originals are backed up first)
   -h, --help  Show this help
 
@@ -88,7 +93,7 @@ esac
 [ ! -e "$repo_root/AGENTS.md" ] || [ -f "$repo_root/AGENTS.md" ] || fail "AGENTS.md exists but is not a regular file."
 [ ! -L "$repo_root/tool" ] || fail "tool/ is a symlink; refusing to write through it."
 [ ! -e "$repo_root/tool" ] || [ -d "$repo_root/tool" ] || fail "tool/ exists but is not a directory."
-for name in preflight.py ci_watch.py; do
+for name in preflight.py ci_watch.py agent_loop.py; do
   [ ! -L "$repo_root/tool/$name" ] || fail "tool/$name is a symlink; refusing to replace it."
   [ ! -e "$repo_root/tool/$name" ] || [ -f "$repo_root/tool/$name" ] || fail "tool/$name exists but is not a regular file."
 done
@@ -119,6 +124,14 @@ most small pushes red:
     (the widget you "forgot" to delete after removing its only user).
   * unused_import - `import '...' as alias;` where `alias.` is gone, and
     `show X` names that are never used.
+  * avoid_print - `print(...)` left in code that ships; the lint is in
+    flutter_lints and `--fatal-infos` turns it into a red step.
+  * unused_field / unused_local_variable - a private name declared once and
+    never mentioned again in its file.
+  * orphan files and ambiguous imports - a lib/ file nothing imports any more
+    (an extracted widget that was never wired up), and a file importing two
+    libraries that both declare the same top-level name. Neither is visible to
+    the per-file checks above, and both waste a CI round.
 
 It is intentionally heuristic: it reads the file as text, blanks comments and
 string literals, and never executes Dart. It will not catch type errors,
@@ -153,10 +166,27 @@ FUNCTION_RE = re.compile(
 IMPORT_RE = re.compile(
     r"(?m)^\s*import\s+'([^']+)'\s*(?:as\s+(\w+))?\s*(?:show\s+([^;]+))?;")
 
+# Comments only; `blanked()` also removes string literals and is therefore
+# unusable for import scanning. See without_comments().
+COMMENT_ONLY = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+
 
 def blanked(src: str) -> str:
     """Replace comments and string literals with spaces, keeping line breaks."""
     return COMMENT_OR_STRING.sub(
+        lambda m: re.sub(r"[^\n]", " ", m.group(0)), src)
+
+
+def without_comments(src: str) -> str:
+    """Blank comments only - string literals survive.
+
+    `blanked()` above is right for anything that must not match a name inside a
+    doc comment or a literal, but it also erases the path inside
+    `import 'package:app/x.dart';`, which is why the import checks need this
+    variant. (They used to run on `blanked()` text and could never match - the
+    unused-import check was dead code for that reason.)
+    """
+    return COMMENT_ONLY.sub(
         lambda m: re.sub(r"[^\n]", " ", m.group(0)), src)
 
 
@@ -314,11 +344,151 @@ def check_imports(path: pathlib.Path, text: str) -> list[str]:
     return problems
 
 
+def check_prints(path: pathlib.Path, text: str, is_test: bool) -> list[str]:
+    """`print(` in code that ships; the lint is avoid_print.
+
+    Skipped for test/ (printing in a test is normal). `debugPrint(` does not
+    match: the pattern demands a non-word, non-dot character before `print`.
+    """
+    if is_test:
+        return []
+    return [f"{path}:{line_of(text, m.start())}: print() in code that ships "
+            f"(avoid_print)"
+            for m in re.finditer(r"(?<![\w.])print\s*\(", text)]
+
+
+def check_private_fields(path: pathlib.Path, raw: str, text: str) -> list[str]:
+    """A private name that is declared and never mentioned again.
+
+    Uses are counted in the raw source, so a use inside a string interpolation
+    (`'$_count'`) still counts, while the declaration is looked up in the
+    blanked source so commented-out code cannot report a field. Requiring the
+    name to appear exactly once keeps false positives out: a field, getter or
+    local that is used anywhere has a second occurrence.
+    """
+    decl = re.compile(
+        r"(?m)^[ \t]+(?:static\s+)?(?:late\s+)?(?:final\s+)?(?:const\s+)?"
+        r"[A-Za-z_][\w<>,.?\s]*?\s+(_\w+)\s*(?:=|;|\{)")
+    problems: list[str] = []
+    seen: set[str] = set()
+    for m in decl.finditer(text):
+        name = m.group(1)
+        if name in seen:
+            continue
+        seen.add(name)
+        if len(re.findall(rf"\b{re.escape(name)}\b", raw)) < 2:
+            problems.append(
+                f"{path}:{line_of(text, m.start())}: private member '{name}' is "
+                f"declared but never used again "
+                f"(unused_field / unused_local_variable)")
+    return problems
+
+
+IMPORT_OR_EXPORT_RE = re.compile(r"(?m)^\s*(?:import|export)\s+'([^']+)'")
+DECL_RE = re.compile(r"(?m)^\s*(?:abstract\s+)?(?:class|enum|mixin|"
+                     r"extension|typedef)\s+([A-Z]\w*)")
+
+
+def resolve_target(source: pathlib.Path, spec: str,
+                   package_name: str | None) -> pathlib.Path | None:
+    """Map an import/export URI onto a file in this repository, or None."""
+    if spec.startswith("dart:"):
+        return None
+    if spec.startswith("package:"):
+        head, _, rest = spec[len("package:"):].partition("/")
+        return pathlib.Path("lib") / rest if package_name == head else None
+    return source.parent / spec
+
+
+def check_cross_file(files: list[pathlib.Path], decl_texts: dict,
+                     code_texts: dict, package_name: str | None,
+                     cwd: pathlib.Path) -> list[str]:
+    """Orphan files, ambiguous imports, duplicate declarations.
+
+    Ambiguity is reported only when one file really imports two libraries that
+    declare the same public name - the same name in two unrelated files is
+    legal Dart and stays silent.
+    """
+    problems: list[str] = []
+
+    def key(p: pathlib.Path) -> str:
+        try:
+            return str((cwd / p).resolve())
+        except OSError:
+            return str(cwd / p)
+
+    declared: dict[pathlib.Path, dict[str, int]] = {}
+    referenced: set[str] = set()
+    for path in files:
+        declared[path] = {m.group(1): line_of(decl_texts[path], m.start())
+                          for m in DECL_RE.finditer(decl_texts[path])}
+        for m in IMPORT_OR_EXPORT_RE.finditer(code_texts[path]):
+            target = resolve_target(path, m.group(1), package_name)
+            if target is not None:
+                referenced.add(key(target))
+
+    # Orphans: only meaningful once something in the tree refers to something
+    # else, so a brand-new single-file project is never nagged.
+    if referenced:
+        for path in files:
+            if pathlib.PurePosixPath(path.as_posix()).parts[:1] != ("lib",):
+                continue
+            if path.name == "main.dart" or "part of" in code_texts[path]:
+                continue
+            if declared[path] and key(path) not in referenced:
+                problems.append(f"{path}: no file imports or exports this one "
+                                f"(orphan file - wire it up or delete it)")
+
+    for path in files:
+        providers: dict[str, list[pathlib.Path]] = {}
+        for m in IMPORT_OR_EXPORT_RE.finditer(code_texts[path]):
+            target = resolve_target(path, m.group(1), package_name)
+            if target is None or key(target) == key(path):
+                continue
+            for other in files:
+                if key(other) != key(target):
+                    continue
+                for name in declared[other]:
+                    bucket = providers.setdefault(name, [])
+                    if all(key(o) != key(other) for o in bucket):
+                        bucket.append(other)
+        for name, sources in providers.items():
+            if len(sources) > 1:
+                where = " and ".join(f"{s}:{declared[s][name]}" for s in sources)
+                problems.append(f"{path}: '{name}' is declared in {where}, and "
+                                f"this file imports both (ambiguous_import)")
+
+    for path, names in declared.items():
+        for name, first_line in names.items():
+            if len(re.findall(rf"(?m)^\s*(?:abstract\s+)?(?:class|enum|mixin|"
+                              rf"extension|typedef)\s+{re.escape(name)}\b",
+                              decl_texts[path])) > 1:
+                problems.append(f"{path}:{first_line}: '{name}' is declared more "
+                                f"than once in this file (duplicate_definition)")
+    return problems
+
+
+def package_name(cwd: pathlib.Path) -> str | None:
+    """`name:` from pubspec.yaml, needed to resolve package: imports."""
+    try:
+        for line in (cwd / "pubspec.yaml").read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^name:\s*([A-Za-z0-9_]+)\s*$", line)
+            if m:
+                return m.group(1)
+    except OSError:
+        return None
+    return None
+
+
 def check_file(path: pathlib.Path) -> list[str]:
-    text = blanked(path.read_text(errors="replace"))
+    raw = path.read_text(errors="replace")
+    text = blanked(raw)
+    code = without_comments(raw)
     return (check_private_classes(path, text)
             + check_private_functions(path, text)
-            + check_imports(path, text))
+            + check_imports(path, code)
+            + check_prints(path, text, is_test="test" in path.parts)
+            + check_private_fields(path, raw, text))
 
 
 def collect(roots: list[str]) -> list[pathlib.Path]:
@@ -335,8 +505,17 @@ def collect(roots: list[str]) -> list[pathlib.Path]:
 def main(argv: list[str]) -> int:
     files = collect(argv[1:] or ["lib", "test"])
     problems: list[str] = []
+    decl_texts: dict[pathlib.Path, str] = {}
+    code_texts: dict[pathlib.Path, str] = {}
     for f in files:
         problems += check_file(f)
+        raw = f.read_text(errors="replace")
+        decl_texts[f] = blanked(raw)
+        code_texts[f] = without_comments(raw)
+    if len(files) > 1:
+        problems += check_cross_file(files, decl_texts, code_texts,
+                                     package_name(pathlib.Path.cwd()),
+                                     pathlib.Path.cwd())
     for line in problems:
         print(line)
     print(f"\npreflight: {len(files)} file(s) checked, {len(problems)} issue(s)")
@@ -619,6 +798,390 @@ if __name__ == "__main__":
     sys.exit(main())
 AGENT_PACK_CI_WATCH_PY_EOF
 
+cat > "$stage/agent_loop.py" <<'AGENT_PACK_AGENT_LOOP_PY_EOF'
+#!/usr/bin/env python3
+"""agent_loop.py - one command for one full change loop.
+
+An agent working in this repository normally spends four or five tool calls
+per iteration: run preflight, commit, push, wait for CI, read the failure.
+Every one of those calls is a place where the loop can be abandoned halfway -
+a push without a preflight, a CI run nobody read, a commit made on `main`.
+
+This script performs the whole loop in one call and stops at the first thing
+that would waste a CI run:
+
+    preflight  ->  secret guard  ->  commit  ->  push  ->  ci_watch
+
+    python3 tool/agent_loop.py -m "fix(profile): guard null avatar"
+    python3 tool/agent_loop.py -m "..." --amend          # fix the last commit
+    python3 tool/agent_loop.py -m "..." --draft-pr       # branch + draft PR
+    python3 tool/agent_loop.py -m "..." --no-watch       # push and stop
+
+What it refuses to do, on purpose:
+
+  * commit on the default branch (main/master) unless `--allow-main` is given:
+    nobody reviews a change that never left main, and CI there is not free;
+  * commit a file that looks like a credential (`.env`, `*.jks`, `*.keystore`,
+    `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
+    unless `--allow-secret-paths` is given: the playbook says secrets never
+    enter git, and a pre-commit refusal is cheaper than a history rewrite;
+  * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
+    given: those findings are exactly what turns a push red.
+
+Exit codes: 0 = pushed (and green, when watched); 1 = CI failed or the push
+failed; 2 = refused or stopped before anything was changed.
+
+Standard library only, python3 >= 3.8. `git` must be on PATH.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+API = "https://api.github.com"
+
+# Paths that must not be committed. Deliberately a short list of things that
+# are secrets in *every* Flutter/Android project; anything project-specific
+# belongs in .gitignore, which this script also honours (see staged_secrets).
+SECRET_PATTERNS = [
+    r"(^|/)\.env(\..*)?$",
+    r"\.jks$", r"\.keystore$", r"\.p12$", r"\.pfx$", r"\.pem$", r"\.key$",
+    r"(^|/)key\.properties$",
+    r"(^|/)google-services\.json$",
+    r"(^|/)GoogleService-Info\.plist$",
+    r"(^|/)secrets/",
+    r"(^|/)service-account.*\.json$",
+]
+
+DEFAULT_BRANCHES = ("main", "master")
+
+
+class Stop(Exception):
+    """A refusal that must happen before anything is changed."""
+
+
+def run(cmd: list[str], cwd: Path | None = None, check: bool = True,
+        capture: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a command, printing it the way a human would type it."""
+    try:
+        proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
+                              capture_output=capture, check=False)
+    except FileNotFoundError as e:
+        raise Stop(f"cannot run {cmd[0]}: {e}") from e
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise Stop(f"`{' '.join(cmd)}` failed ({proc.returncode})"
+                   + (f":\n{detail}" if detail else ""))
+    return proc
+
+
+def git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return run(["git", *args], cwd=cwd, check=check)
+
+
+def git_out(*args: str, cwd: Path) -> str:
+    return git(*args, cwd=cwd).stdout.strip()
+
+
+def repo_root() -> Path:
+    proc = run(["git", "rev-parse", "--show-toplevel"], check=False)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise Stop("not inside a git repository")
+    return Path(proc.stdout.strip())
+
+
+def default_branch(root: Path) -> str:
+    """Best effort: origin/HEAD, then whichever of main/master exists."""
+    proc = git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", cwd=root,
+               check=False)
+    if proc.returncode == 0 and "/" in proc.stdout:
+        return proc.stdout.strip().rsplit("/", 1)[-1]
+    for name in DEFAULT_BRANCHES:
+        if git("rev-parse", "--verify", "--quiet", f"refs/heads/{name}", cwd=root,
+               check=False).returncode == 0:
+            return name
+    return "main"
+
+
+def staged_secrets(root: Path) -> list[str]:
+    """Staged paths that look like credentials (ignoring .gitignore'd ones)."""
+    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
+    hits: list[str] = []
+    for path in proc.stdout.splitlines():
+        path = path.strip()
+        if not path:
+            continue
+        if any(re.search(pattern, path) for pattern in SECRET_PATTERNS):
+            hits.append(path)
+    return hits
+
+
+def resolve_token(arg: str | None) -> str | None:
+    """Same order as ci_watch.py: flag, environment, then the GitHub CLI."""
+    if arg:
+        try:
+            token = Path(arg).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            raise Stop(f"cannot read --token-file {arg}: {e}") from e
+        return token or None
+    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
+        token = os.environ.get(var, "").strip()
+        if token:
+            return token
+    if subprocess.run(["which", "gh"], capture_output=True).returncode == 0:
+        proc = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                              text=True, check=False)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    return None
+
+
+def api_request(method: str, path: str, token: str, payload: dict | None = None):
+    url = path if path.startswith("http") else API + path
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "agent_loop.py (flutter-builder agent pack)",
+        "Authorization": f"Bearer {token}",
+    }
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode()
+            return resp.status, (json.loads(body) if body.strip() else {})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        try:
+            return e.code, json.loads(body)
+        except json.JSONDecodeError:
+            return e.code, {"message": body[:300]}
+    except Exception as e:  # noqa: BLE001 - transport failures are reported, not raised
+        return 0, {"message": str(e)}
+
+
+def github_repo(root: Path) -> str | None:
+    proc = git("remote", "get-url", "origin", cwd=root, check=False)
+    if proc.returncode != 0:
+        return None
+    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/.]+?)(?:\.git)?$",
+                      proc.stdout.strip())
+    return f"{match.group('owner')}/{match.group('name')}" if match else None
+
+
+def open_or_update_pr(root: Path, branch: str, title: str, body: str,
+                      draft: bool, token: str, ready: bool) -> int:
+    """Create a PR for the branch (or report the existing one). Draft by default."""
+    repo = github_repo(root)
+    if not repo:
+        print("agent_loop: no GitHub 'origin' remote; skipping the PR step.")
+        return 0
+    owner = repo.split("/")[0]
+    status, existing = api_request("GET", f"/repos/{repo}/pulls?head={owner}:{branch}&state=open",
+                                   token)
+    if status == 200 and existing:
+        pr = existing[0]
+        print(f"Pull request already open: {pr['html_url']}")
+        if ready and pr.get("draft"):
+            status, data = api_request("POST", "/graphql", token, {
+                "query": "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id})"
+                         " { pullRequest { url isDraft } } }",
+                "variables": {"id": pr["node_id"]},
+            })
+            if status == 200 and "errors" not in data:
+                print("Marked the pull request ready for review.")
+            else:
+                print(f"::warning::could not mark it ready: {data}")
+        return 0
+    base = default_branch(root)
+    status, pr = api_request("POST", f"/repos/{repo}/pulls", token, {
+        "title": title, "head": branch, "base": base, "body": body, "draft": draft,
+    })
+    if status in (200, 201):
+        print(f"Pull request {'(draft) ' if draft else ''}created: {pr['html_url']}")
+        return 0
+    print(f"agent_loop: could not open a pull request (HTTP {status}): "
+          f"{pr.get('message', pr)}")
+    return 0  # a PR problem must not fail an otherwise good push
+
+
+def watch(root: Path, sha: str, args) -> int:
+    """Delegate to the sibling ci_watch.py, which owns the polling behaviour."""
+    script = HERE / "ci_watch.py"
+    if not script.exists():
+        print(f"agent_loop: {script} not found; push finished, watch skipped.")
+        return 0
+    cmd = [sys.executable, str(script), "--sha", sha]
+    if args.token_file:
+        cmd += ["--token-file", args.token_file]
+    if args.timeout:
+        cmd += ["--timeout", str(args.timeout)]
+    if args.interval:
+        cmd += ["--interval", str(args.interval)]
+    return subprocess.run(cmd, cwd=str(root)).returncode
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="agent_loop.py",
+        description="preflight -> commit -> push -> watch CI, in one call.")
+    parser.add_argument("-m", "--message", help="commit message (conventional commits)")
+    parser.add_argument("--amend", action="store_true",
+                        help="amend the last commit (pushes with --force-with-lease)")
+    parser.add_argument("--paths", nargs="*", default=None,
+                        help="paths to stage (default: everything changed)")
+    parser.add_argument("--allow-main", action="store_true",
+                        help="permit a commit on the default branch")
+    parser.add_argument("--allow-secret-paths", action="store_true",
+                        help="stage files that look like credentials (review them first)")
+    parser.add_argument("--no-preflight", action="store_true",
+                        help="skip tool/preflight.py (CI will be the first check)")
+    parser.add_argument("--no-push", action="store_true", help="commit only")
+    parser.add_argument("--no-watch", action="store_true",
+                        help="push and return (useful for draft pull requests)")
+    parser.add_argument("--draft-pr", action="store_true",
+                        help="open a draft pull request for this branch")
+    parser.add_argument("--ready", action="store_true",
+                        help="mark an existing draft pull request ready for review")
+    parser.add_argument("--token-file",
+                        help="file holding a GitHub token (for --draft-pr / watching)")
+    parser.add_argument("--timeout", type=int, help="passed to ci_watch.py")
+    parser.add_argument("--interval", type=int, help="passed to ci_watch.py")
+    args = parser.parse_args(argv[1:])
+
+    if not args.message and not args.amend:
+        parser.error("give -m/--message (or --amend to reuse the previous message)")
+    if args.no_preflight and not (args.no_watch or args.no_push):
+        print("agent_loop: --no-preflight with a watched push means CI is the "
+              "first check; that is exactly the slow path this tool avoids.")
+
+    root = repo_root()
+    branch = git_out("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+    base = default_branch(root)
+    if branch == base and not args.allow_main:
+        raise Stop(
+            f"HEAD is on '{branch}' (the default branch). Commit on a branch "
+            f"instead, or pass --allow-main if the project really works that way.\n"
+            f"  git switch -c fix/short-description")
+    if branch == "HEAD":
+        raise Stop("detached HEAD; check out a branch first.")
+
+    started = time.time()
+
+    # 1. preflight -- the cheap check that saves a full CI round.
+    if not args.no_preflight:
+        script = HERE / "preflight.py"
+        if script.exists():
+            proc = subprocess.run([sys.executable, str(script)], cwd=str(root),
+                                  text=True, capture_output=True)
+            sys.stdout.write(proc.stdout)
+            if proc.returncode != 0:
+                print("agent_loop: preflight reported issues - nothing was "
+                      "committed. Fix them, or pass --no-preflight if they are "
+                      "deliberate.", file=sys.stderr)
+                return 2
+        else:
+            print(f"agent_loop: {script} not found; preflight skipped.")
+
+    # 2. stage.
+    if args.paths:
+        git("add", "--", *args.paths, cwd=root)
+    else:
+        git("add", "-A", cwd=root)
+
+    if not args.amend:
+        staged = git("diff", "--cached", "--name-only", cwd=root).stdout.strip()
+        if not staged:
+            print("agent_loop: nothing staged; there is no change to commit.")
+            return 2
+
+    # 3. secret guard -- before the commit, never after the push.
+    hits = staged_secrets(root)
+    if hits and not args.allow_secret_paths:
+        print("agent_loop: refusing to commit files that look like credentials:",
+              file=sys.stderr)
+        for path in hits:
+            print(f"  {path}", file=sys.stderr)
+        print("  Add them to .gitignore (and rotate anything already exposed), "
+              "or pass --allow-secret-paths if they are safe by design.",
+              file=sys.stderr)
+        return 2
+
+    # 4. commit.
+    if args.amend:
+        cmd = ["commit", "--amend", "--no-edit"] if not args.message \
+            else ["commit", "--amend", "-m", args.message]
+        git(*cmd, cwd=root)
+    else:
+        git("commit", "-m", args.message, cwd=root)
+    sha = git_out("rev-parse", "HEAD", cwd=root)
+    print(f"Committed {sha[:7]} on {branch}: "
+          f"{git_out('log', '-1', '--pretty=%s', cwd=root)}")
+
+    if args.no_push:
+        print("agent_loop: --no-push; stopped after the commit.")
+        return 0
+
+    # 5. push. An amended commit needs --force-with-lease: plain --force would
+    # risk clobbering work somebody else pushed to the same branch.
+    push = ["push"]
+    if args.amend:
+        push += ["--force-with-lease"]
+    upstream = git("rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                   "@{upstream}", cwd=root, check=False).returncode != 0
+    if upstream:
+        push += ["-u", "origin", branch]
+    proc = run(["git", *push], cwd=root, check=False)
+    sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        print("agent_loop: push failed (see git's message above).", file=sys.stderr)
+        return 1
+    print(f"Pushed {sha[:7]} ({time.time() - started:.1f}s since start).")
+
+    if args.draft_pr or args.ready:
+        token = resolve_token(args.token_file)
+        if not token:
+            print("agent_loop: no token for the PR step (--token-file, "
+                  "$GITHUB_TOKEN, or `gh auth login`).")
+        else:
+            title = args.message or git_out("log", "-1", "--pretty=%s", cwd=root)
+            open_or_update_pr(root, branch, title,
+                              "Opened by `tool/agent_loop.py`.\n\n"
+                              "<!-- agent-loop-pr -->", draft=not args.ready,
+                              token=token, ready=args.ready)
+            if not args.ready:
+                print("Draft PRs run no CI; use --ready when you want the run.")
+
+    # 6. watch. A draft PR runs no CI at all, so waiting would time out.
+    if args.no_watch or args.draft_pr:
+        print("agent_loop: done (CI not watched).")
+        return 0
+    return watch(root, sha, args)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main(sys.argv))
+    except Stop as e:
+        print(f"agent_loop: {e}", file=sys.stderr)
+        raise SystemExit(2)
+    except KeyboardInterrupt:
+        raise SystemExit("\ninterrupted.")
+AGENT_PACK_AGENT_LOOP_PY_EOF
+
 cat > "$stage/agents-template.md" <<'AGENT_PACK_AGENTS_MD_EOF'
 # AGENTS.md — {{APP_NAME}}
 
@@ -641,6 +1204,7 @@ result would not match CI (SDK pin, Android SDK, Firebase secrets). So:
 ```bash
 python3 tool/preflight.py     # before pushing: dead code / unused params / unused imports
 python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing lines
+python3 tool/agent_loop.py -m "fix(scope): what changed"   # all five steps, one call
 ```
 
 ## The fast loop — one change, one push, one CI round
@@ -660,6 +1224,33 @@ python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing 
 
 Rules of thumb: ten 30-second pushes waste more time than one 3-minute CI run.
 Read the CI log before editing; guessing at a red build doubles the rounds.
+
+### The same loop as one command
+
+`tool/agent_loop.py` performs steps 2-5 in a single call, and stops before the
+first thing that would waste a run:
+
+```bash
+python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+python3 tool/agent_loop.py -m "fix(profile): drop the unused import" --amend
+python3 tool/agent_loop.py -m "feat(cv): add PDF export" --draft-pr
+python3 tool/agent_loop.py -m "..." --ready          # drafts run no CI: this starts it
+python3 tool/agent_loop.py -m "..." --no-watch       # push and return immediately
+```
+
+It refuses, before touching the repository, when
+
+- HEAD is the default branch (`main`/`master`) — use a branch, or `--allow-main`
+  when the project really works that way;
+- a staged file looks like a credential (`.env`, `*.jks`, `*.keystore`, `*.pem`,
+  `key.properties`, `google-services.json`, `secrets/**`, …) — a refusal costs
+  one edit, a leaked keystore costs a rotation;
+- `preflight.py` reports anything — use `--no-preflight` only when the findings
+  are deliberate.
+
+Exit codes: `0` pushed (and green when watched), `1` CI red or push failed,
+`2` refused before changing anything. An `--amend` push uses
+`--force-with-lease`, never a bare `--force`.
 
 ## What a push costs here (and why it is already cheap)
 
@@ -754,7 +1345,7 @@ AGENT_PACK_AGENTS_MD_EOF
 
 changes=()
 conflicts=()
-for name in preflight.py ci_watch.py; do
+for name in preflight.py ci_watch.py agent_loop.py; do
   dest="$repo_root/tool/$name"
   if [ -e "$dest" ]; then
     if cmp -s "$stage/$name" "$dest"; then
@@ -871,6 +1462,7 @@ fi
 say "Done. Review the changes, then commit tool/ and AGENTS.md."
 say "  Before a push :  python3 tool/preflight.py"
 say "  After a push  :  python3 tool/ci_watch.py"
+say "  Whole loop    :  python3 tool/agent_loop.py -m \"fix(x): what changed\""
 say "  Pack docs     :  ${RAW_BASE}/README.md"
 if [ ! -e "$repo_root/.agent-pack-backups" ]; then
   :

@@ -43,6 +43,23 @@ on:
         required: false
         type: boolean
         default: true
+      format-paths:
+        description: >-
+          Paths handed to `dart format --set-exit-if-changed` (space
+          separated). The default `.` also walks generated code; scope it to
+          `lib test` (or similar) when *.g.dart / *.freezed.dart in the tree
+          are not stored in formatted form, so a formatting check cannot fail
+          on a file nobody edits by hand.
+        required: false
+        type: string
+        default: "."
+      test-concurrency:
+        description: >-
+          Passed to `flutter test --concurrency N`. 0 keeps Flutter's own
+          default (one isolate per CPU core).
+        required: false
+        type: number
+        default: 0
       skip-draft-prs:
         description: >-
           Skip validation while the caller's pull request is a draft; the run
@@ -196,6 +213,22 @@ on:
         required: false
         type: boolean
         default: false
+      build-mode:
+        description: >-
+          Build mode of the APK that build-apk produces: release (default),
+          profile or debug. profile/debug are markedly faster for a device
+          smoke test; never publish an artifact built with them.
+        required: false
+        type: string
+        default: release
+      target-platform:
+        description: >-
+          Optional --target-platform for the APK (for example android-arm64):
+          one ABI instead of a universal APK builds faster and is easier to
+          install on a test device.
+        required: false
+        type: string
+        default: ""
       build-web:
         description: Build a release web bundle and upload it as an artifact
         required: false
@@ -224,6 +257,15 @@ on:
         required: false
         type: string
         default: ""
+      test-matrix-on-pr:
+        description: >-
+          Run the extra-channel matrix on pull requests as well. Off by
+          default: the matrix exists to catch a channel break before a
+          release, which main and a nightly run already cover, and every PR
+          would otherwise pay for a second full job.
+        required: false
+        type: boolean
+        default: false
       # ---------------------------------------------------------------
       # Distribution
       # ---------------------------------------------------------------
@@ -435,6 +477,20 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Codegen is the most expensive cacheable step in a build_runner
+      # project (30 s - 3 min per run). The key covers pubspec.lock plus every
+      # Dart source, so an edited source always produces a fresh key and a
+      # stale generated tree is impossible; --delete-conflicting-outputs stays
+      # in place as the second safety net.
+      - name: Cache build_runner output
+        if: inputs.codegen == 'build_runner' || inputs.codegen == 'both'
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.working-directory }}/.dart_tool/build
+          key: build-runner-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}-${{ hashFiles('**/lib/**/*.dart', '**/test/**/*.dart') }}
+          restore-keys: |
+            build-runner-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}-
+
       - name: Run code generation
         if: inputs.codegen != 'none' && inputs.codegen != ''
         run: |
@@ -454,21 +510,28 @@ jobs:
 
       - name: Check Dart formatting
         if: inputs.run-format-check
-        run: dart format --output=none --set-exit-if-changed .
+        run: dart format --output=none --set-exit-if-changed ${{ inputs.format-paths }}
 
       - name: Analyze source code
         if: inputs.run-analyze
-        run: flutter analyze --fatal-infos
+        run: flutter analyze --no-pub --fatal-infos
 
       - name: Run tests
         if: inputs.run-tests
+        env:
+          TEST_CONCURRENCY: ${{ inputs.test-concurrency }}
         run: |
+          args=(--no-pub)
+          case "${TEST_CONCURRENCY:-0}" in
+            ''|0) ;;  # keep Flutter's own default
+            *) args+=(--concurrency="$TEST_CONCURRENCY") ;;
+          esac
           if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
             if [ "${{ inputs.code-coverage }}" = "true" ]; then
               echo "Running tests with coverage..."
-              flutter test --coverage
+              flutter test --coverage "${args[@]}"
             else
-              flutter test
+              flutter test "${args[@]}"
             fi
           else
             echo "No *_test.dart files found; test step skipped."
@@ -808,7 +871,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Keshab1997/flutter-builder
-          ref: v1.7.0
+          # Must carry the same tag as this file: doctor.sh ships with it.
+          ref: v1.9.1
           path: .flutter-builder
 
       - name: Pre-flight doctor
@@ -825,8 +889,45 @@ jobs:
           fi
           bash "$script" --ci
 
+      # Gradle downloads its distribution and every Maven dependency on each
+      # run - one to three minutes that the Flutter SDK cache does not cover
+      # (`subosito/flutter-action` caches the SDK and pub, not ~/.gradle).
+      # PRs only read the cache: a PR writing the same key as main would
+      # evict what main just stored.
+      - name: Set up Gradle (dependency and wrapper cache)
+        if: inputs.build-apk || inputs.build-aab
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      # Caching downloads is not enough on its own: without these keys Gradle
+      # re-runs the whole configuration phase and serialises work that could
+      # run in parallel. Only missing keys are appended - the project's own
+      # gradle.properties is never rewritten. `org.gradle.configuration-cache`
+      # is deliberately NOT set here: it still breaks some AGP/plugin
+      # combinations, so it stays an opt-in in the project's own file.
+      - name: Enable Gradle build cache
+        if: inputs.build-apk || inputs.build-aab
+        run: |
+          set -euo pipefail
+          if [ ! -d android ]; then
+            echo "No android/ directory (generate-android-platform is off); nothing to configure."
+            exit 0
+          fi
+          props=android/gradle.properties
+          touch "$props"
+          add() { grep -qE "^$1=" "$props" || printf '%s=%s\n' "$1" "$2" >> "$props"; }
+          add org.gradle.caching true
+          add org.gradle.parallel true
+          add org.gradle.jvmargs "-Xmx4g -XX:MaxMetaspaceSize=1g"
+          echo "--- android/gradle.properties ---"
+          cat "$props"
+
       - name: Build release APK
         if: inputs.build-apk
+        env:
+          BUILD_MODE: ${{ inputs.build-mode }}
+          TARGET_PLATFORM: ${{ inputs.target-platform }}
         run: |
           dart_define_args=()
           while IFS= read -r line; do
@@ -836,10 +937,20 @@ jobs:
           if [ "${{ inputs.split-per-abi }}" = "true" ]; then
             extra_args+=(--split-per-abi)
           fi
-          if [ "${{ inputs.obfuscate }}" = "true" ]; then
-            extra_args+=(--obfuscate --split-debug-info=build/symbols)
+          if [ -n "${TARGET_PLATFORM:-}" ]; then
+            extra_args+=(--target-platform "$TARGET_PLATFORM")
           fi
-          flutter build apk --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}"
+          mode="${BUILD_MODE:-release}"
+          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+            # --obfuscate is a release-only flag: on a profile/debug build it
+            # is the difference between an artifact and a red step.
+            if [ "$mode" = "release" ]; then
+              extra_args+=(--obfuscate --split-debug-info=build/symbols)
+            else
+              echo "::notice::obfuscate skipped: --obfuscate is release-only and this is a $mode build."
+            fi
+          fi
+          flutter build apk --no-pub --"$mode" ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}"
 
       - name: Build signed release AAB
         if: inputs.build-aab
@@ -869,7 +980,7 @@ jobs:
           if [ "${{ inputs.obfuscate }}" = "true" ]; then
             extra_args+=(--obfuscate --split-debug-info=build/symbols)
           fi
-          flutter build appbundle --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}" || true
+          flutter build appbundle --no-pub --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}" || true
           # The fallback must receive the same defines, otherwise the bundle
           # would silently compile with the app's defaults (e.g. test ad units).
           test -f build/app/outputs/bundle/release/app-release.aab || (
@@ -1395,7 +1506,7 @@ jobs:
   # channels so a breaking change on another channel is caught before release.
   prepare-matrix:
     name: Prepare Flutter channel matrix
-    if: inputs.test-matrix != '' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
+    if: inputs.test-matrix != '' && (inputs.test-matrix-on-pr || github.event_name != 'pull_request') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
     runs-on: ubuntu-latest
     outputs:
       channels: ${{ steps.channels.outputs.channels }}
@@ -1418,7 +1529,7 @@ jobs:
   matrix-validate:
     name: Validate on ${{ matrix.flutter-channel }}
     needs: prepare-matrix
-    if: inputs.test-matrix != '' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
+    if: inputs.test-matrix != '' && (inputs.test-matrix-on-pr || github.event_name != 'pull_request') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -1450,17 +1561,24 @@ jobs:
 
       - name: Check Dart formatting
         if: inputs.run-format-check
-        run: dart format --output=none --set-exit-if-changed .
+        run: dart format --output=none --set-exit-if-changed ${{ inputs.format-paths }}
 
       - name: Analyze source code
         if: inputs.run-analyze
-        run: flutter analyze --fatal-infos
+        run: flutter analyze --no-pub --fatal-infos
 
       - name: Run tests
         if: inputs.run-tests
+        env:
+          TEST_CONCURRENCY: ${{ inputs.test-concurrency }}
         run: |
+          args=(--no-pub)
+          case "${TEST_CONCURRENCY:-0}" in
+            ''|0) ;;  # keep Flutter's own default
+            *) args+=(--concurrency="$TEST_CONCURRENCY") ;;
+          esac
           if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
-            flutter test
+            flutter test "${args[@]}"
           else
             echo "No *_test.dart files found; test step skipped."
           fi
