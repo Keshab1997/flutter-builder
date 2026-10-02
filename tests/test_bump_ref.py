@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bump-ref.sh"
+# The pin the tool writes when no --ref is given. Read from the script so a
+# version bump never breaks these tests.
+PIN = re.search(r"^DEFAULT_REF=(\S+)$", SCRIPT.read_text(encoding="utf-8"), re.M).group(1)
 
 CUSTOM_CI = """name: Custom CI
 
@@ -77,7 +81,7 @@ class BumpRefTests(unittest.TestCase):
         result = self.run_tool()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         text = ci.read_text()
-        self.assertIn("flutter-build.yml@v1.8.8", text)
+        self.assertIn(f"flutter-build.yml@{PIN}", text)
         self.assertIn("actions/checkout@v5", text)
         self.assertIn("whatsnew-check", text)
         self.assertIn("# a precious local comment", text)
@@ -90,12 +94,12 @@ class BumpRefTests(unittest.TestCase):
         result = self.run_tool()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         text = mixed.read_text()
-        self.assertEqual(text.count("@v1.8.8"), 4)
+        self.assertEqual(text.count(f"@{PIN}"), 4)
         self.assertNotIn("@main", text)
         self.assertNotIn("@v1.8.6", text)
         self.assertNotIn("@v1.8.7", text)
         self.assertNotIn("1234567890abcdef", text)
-        self.assertIn("web-preview.yml@v1.8.8  # trailing note", text)
+        self.assertIn(f"web-preview.yml@{PIN}  # trailing note", text)
         self.assertEqual(other.read_text(), "# nothing here\n")
 
     def test_dry_run_changes_nothing(self) -> None:
@@ -120,7 +124,7 @@ class BumpRefTests(unittest.TestCase):
         path = self.write("notes.yml", COMMENT_ONLY)
         result = self.run_tool()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("flutter-build.yml@v1.8.8", path.read_text())
+        self.assertIn(f"flutter-build.yml@{PIN}", path.read_text())
         self.assertIn("actions/checkout@v5", path.read_text())
 
     def test_ref_override_and_piped_bash(self) -> None:

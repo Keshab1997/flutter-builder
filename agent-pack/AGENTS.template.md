@@ -3,7 +3,7 @@
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep one change loop short.
 
-<!-- flutter-builder:agent-pack:start v1.9.0 -->
+<!-- flutter-builder:agent-pack:start v1.9.1 -->
 ## Rule #1 — CI verifies, you never push a guess
 
 This sandbox usually has **no Flutter SDK**, and even when it does, the local
