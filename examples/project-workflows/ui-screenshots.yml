@@ -1,0 +1,46 @@
+name: Flutter UI screenshots
+
+# Drop this file into <app>/.github/workflows/ and every pull request gets
+# pictures of the changed screens without anyone installing the app.
+#
+# The app needs web support (`web/` in the repository, or add it once with
+# `flutter create --platforms=web .`). Apps that use platform-only plugins
+# (camera, bluetooth, local notifications) will not render on web - the capture
+# step reports that instead of showing an empty screen.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Both are required: `contents: write` to push the images to the
+# `ui-screenshots` branch, `pull-requests: write` to comment them.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    # A draft pull request is a scratchpad: screenshots start when it is marked
+    # ready for review, so iterating costs nothing.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # v1.10.0 is the first release that ships this workflow (older tags do not
+    # contain the file). Move this pin forward with scripts/bump-ref.sh.
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.10.0
+    with:
+      flutter-channel: stable
+      # List the screens this app actually has. `/` is the home screen; for
+      # anything deeper, give the route the app navigates to (`/settings`,
+      # `/profile`) or wire up an integration test.
+      routes: "/"
+      # A phone and a small tablet. Older/smaller screens are where layout
+      # breaks, so both are worth a look.
+      viewports: "390x844,768x1024"
+      # Give Firebase/Supabase-configured apps the same values the build uses,
+      # otherwise the screenshot is of a crash screen:
+      # dart-defines: |
+      #   API_BASE_URL=https://api.example.com
+      embed-in-pr: true

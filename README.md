@@ -113,6 +113,56 @@ Flutter SDK আর pub cache আগেই ছিল; কিন্তু Android 
 
 নতুন inputs (সবগুলোই opt-in, আগের আচরণ অপরিবর্তিত): `format-paths` (default `.`), `test-concurrency` (default 0 = Flutter-এর নিজের সেটিং), `build-mode` (default `release`; `profile` দিলে device test অনেক দ্রুত, তবে কখনো publish করার জন্য নয়), `target-platform` (যেমন `android-arm64`), `test-matrix-on-pr` (default false)।
 
+## UI দেখা — তিন উপায় (v1.10+)
+
+Agent কোড বদলাতে পারে, কিন্তু অ্যাপ চালিয়ে দেখতে পারে না — emulator বা হাতের ফোন তার নেই। তাই UI দেখার তিনটা রাস্তা:
+
+| উপায় | কেমন | লাগে | খরচ |
+|---|---|---|---|
+| **1. Web preview** (আগেই আছে) | ব্রাউজারে **লাইভ লিংক** — ক্লিক করে ঘুরে দেখবেন | `web/` folder + Pages চালু | ~২–৪ মিনিট/run |
+| **2. UI screenshots** (নতুন) | PR-এ **ছবি এমবেড** হয়ে যায়, স্ক্রল করেই দেখা যায় | `web/` folder + নিচের caller | ~২–৪ মিনিট/run |
+| **3. আসল Android** | APK ফোনে বসিয়ে নিজের চোখে | signing secret | manual build + আপনার সময় |
+
+### Web preview (লাইভ, ক্লিক করে)
+
+```yaml
+jobs:
+  preview:
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.9.1
+    with:
+      working-directory: "."
+      comment-on-pr: true
+    secrets: inherit
+```
+
+হলো — ব্রাউজারে `preview/<branch>/` লিংক খুললে অ্যাপ চলে। এটা **interactive**, তাই এনিমেশন, স্ক্রল, টাইপ করা সব দেখা যায়। `web/` না থাকলে: `flutter create --platforms=web .` একবার চালালেই যোগ হবে।
+
+### UI screenshots (PR-এর ভেতরে ছবি)
+
+[`examples/project-workflows/ui-screenshots.yml`](examples/project-workflows/ui-screenshots.yml) কপি করে app repo-র `.github/workflows/`-এ বসান, ব্যাস। প্রতি PR-এ:
+
+- web build → static server → headless Chromium → `routes` × `viewports` ধরে ছবি;
+- ছবিগুলো PR-এ **comment** হয় (একই comment প্রতি push-এ update হয়, নতুন করে spam করে না), workflow artifact-এ download-ও করা যায়;
+- ছবি থাকে `ui-screenshots` নামের একটা আলাদা branch-এ — GitHub markdown-এ ছবি এমবেড করতে হলে এমন public URL লাগে, artifact-এর লিংকে লগইন দরকার।
+
+```yaml
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.10.0
+    with:
+      routes: "/,/settings"          # hash strategy: '/settings' → '#/settings'
+      viewports: "390x844,768x1024"  # ফোন + ছোট ট্যাবলেট
+      wait-ms: 8000                  # অ্যাপ settle হওয়ার সময়
+```
+
+**যে কথা মনে রাখবেন (সৎ সীমাবদ্ধতা):**
+
+- এটা **web build**, তাই Android-এর হুবহু চেহারা নয় — layout, রং, spacing, টেক্সট দেখা যায়; ফন্ট/platform widget একটু আলাদা লাগতে পারে।
+- **Camera, Bluetooth, local notification** জাতীয় platform-only plugin web-এ চলে না। তখন ছবি ফাঁকা আসবে — script নিজেই "possibly a blank screen" warning দেয়, চুপ করে থাকে না।
+- ছবি **স্থির** — এনিমেশন/transition বোঝা যাবে না। সেগুলোর জন্য web preview।
+- `routes:` শুধু অ্যাপের নিজের route ধরতে পারে; গভীর flow (login → profile → edit) দেখাতে হলে `integration_test` লিখতে হবে — এখনো এটা সাপোর্টেড নয়।
+- Fork থেকে আসা PR-এ comment করা যায় না (token-এর write নেই) — ছবি শুধু artifact-এ থাকবে।
+- প্রথম run-এ Chromium নামে, তাই একটু ধীর; পরে cache হয়।
+- Caller workflow-এ `contents: write` আর `pull-requests: write` লাগবে।
+
 ## Build ও release
 
 - **CI**: format, analyze ও tests চালায়—সাধারণত pull request review-এর জন্য।
@@ -263,6 +313,8 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 - `scripts/install-agent-pack.sh` — `tool/preflight.py`, `tool/ci_watch.py`, `tool/agent_loop.py` ও managed `AGENTS.md` block বসায় (SDK ছাড়া)
 - `agent-pack/` — agent pack-এর canonical ফাইল, যা installer-এর ভিতরে embed করা (tests দুই কপি এক রাখে)
 - `scripts/sync-agent-pack.py` — canonical ফাইল আর installer-এর embedded কপি এক রাখে (`--check` দিলে শুধু জানায়); সবসময় `agent-pack/` edit করে এটা চালান
+- `scripts/capture-screenshots.sh` — web build-এর ছবি তোলে (Playwright চালায়; `ui-screenshots.yml` আর smoke test দুটোই এটাই চালায়)
+- `scripts/embed-screenshots.sh` — ছবি `ui-screenshots` branch-এ push করে PR-এ comment দেয় (কিছু ব্যর্থ হলেও build লাল হয় না)
 - `scripts/doctor.sh` — app configuration checker
 - `examples/project-workflows/` — app repository-তে ব্যবহারের নমুনা workflow
 - `docs/` — signing ও secret setup নির্দেশিকা

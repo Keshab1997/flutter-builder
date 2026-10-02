@@ -22,14 +22,18 @@ on:
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
       - .github/workflows/publish-release.yml
+      - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
+      - scripts/capture-screenshots.sh
   pull_request:
     paths:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
       - .github/workflows/publish-release.yml
+      - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
+      - scripts/capture-screenshots.sh
   schedule:
     # Weekly, even when nothing changes here: catches upstream Flutter /
     # Gradle / runner-image breakage before callers hit it.
@@ -119,3 +123,69 @@ jobs:
         working-directory: ${{ env.SMOKE_APP_DIR }}
         run: |
           ls -lh build/app/outputs/flutter-apk/*.apk
+
+  # Validates the screenshot pipeline end to end: a real Flutter web build, a
+  # real static server, a real headless browser, and a PNG that must actually
+  # be 390x844. Without this job the capture script would only be exercised the
+  # first time a user's pull request calls ui-screenshots.yml.
+  screenshots:
+    name: Screenshot pipeline (web build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SMOKE_WEB_DIR: smoke-web
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel || 'stable' }}
+          cache: true
+
+      - name: Generate a fresh Flutter app with web support
+        run: |
+          flutter create \
+            --platforms=web \
+            --org dev.flutterbuilder.smoke \
+            --project-name flutter_builder_web_smoke_app \
+            "$SMOKE_WEB_DIR"
+
+      - name: Build web
+        working-directory: ${{ env.SMOKE_WEB_DIR }}
+        run: flutter build web --release
+
+      - name: Capture screenshots with the shipped script
+        run: |
+          bash scripts/capture-screenshots.sh \
+            --build-dir "$SMOKE_WEB_DIR/build/web" \
+            --out /tmp/ui-smoke \
+            --routes / \
+            --viewports 390x844 \
+            --wait-ms 6000
+
+      - name: Verify the PNG is a real 390x844 image
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import struct
+
+          pngs = sorted(pathlib.Path("/tmp/ui-smoke").glob("*.png"))
+          assert pngs, "no PNG was captured"
+          for path in pngs:
+              data = path.read_bytes()
+              assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path} is not a PNG"
+              # PNG IHDR: width and height are big-endian uint32 at 16 and 20.
+              width, height = struct.unpack(">II", data[16:24])
+              assert (width, height) == (390, 844), f"{path} is {width}x{height}"
+              assert len(data) > 5000, f"{path} is suspiciously small ({len(data)} bytes)"
+              print(f"{path.name}: {width}x{height}, {len(data) // 1024} KB")
+          PY
+
+      - name: Upload what the pipeline produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-ui-screenshots
+          path: /tmp/ui-smoke/*.png
+          if-no-files-found: warn
