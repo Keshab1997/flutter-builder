@@ -27,7 +27,14 @@ BUILD_DIR="build/web"
 OUT="ui-screenshots"
 ROUTES="/"
 VIEWPORTS="390x844"
-WAIT_MS=8000
+# 12 s, not 8: the wait only starts after the page's load event, and a cold
+# release build still has to fetch and boot CanvasKit (~6 MB) before the first
+# frame. The first CI run of this script produced a solid white 390x844 PNG at
+# 6 s, which is exactly that.
+WAIT_MS=12000
+RETRIES=2
+MIN_KB=5
+WAIT_FOR_SELECTOR=""
 PORT=8080
 
 usage() {
@@ -40,7 +47,14 @@ Capture screenshots of a built Flutter web app.
                        '/' becomes #/, '/settings' becomes #/settings - the
                        default Flutter web URL strategy is hash based.
   --viewports LIST     comma separated WxH pairs (default: 390x844, a phone)
-  --wait-ms MS         settle time before each shot (default: 8000)
+  --wait-ms MS         settle time before each shot (default: 12000; raise it
+                       on a slow runner - a cold CanvasKit boot is ~15 s)
+  --retries N          extra attempts when a shot looks blank, each waiting
+                       twice as long (default: 2)
+  --min-kb KB          below this size a shot is treated as blank (default: 5)
+  --wait-for-selector S
+                       wait for a CSS selector before shooting (for example
+                       `flutter-view`); empty waits only for --wait-ms
   --port PORT          local port for the static server (default: 8080)
   -h, --help           this text
 
@@ -55,6 +69,9 @@ while [ "$#" -gt 0 ]; do
     --routes)    ROUTES="${2:?--routes needs a value}"; shift 2 ;;
     --viewports) VIEWPORTS="${2:?--viewports needs a value}"; shift 2 ;;
     --wait-ms)   WAIT_MS="${2:?--wait-ms needs a value}"; shift 2 ;;
+    --retries)   RETRIES="${2:?--retries needs a value}"; shift 2 ;;
+    --min-kb)    MIN_KB="${2:?--min-kb needs a value}"; shift 2 ;;
+    --wait-for-selector) WAIT_FOR_SELECTOR="${2:?--wait-for-selector needs a value}"; shift 2 ;;
     --port)      PORT="${2:?--port needs a value}"; shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) printf 'capture-screenshots: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -146,20 +163,40 @@ for viewport in "${viewport_list[@]}"; do
       '/'|'')   fragment="#/" ;;
       *)        fragment="#$route" ;;
     esac
-    name="$(slug "${route:-home}")-${width}x${height}"
+    route_slug="$(slug "${route}")"
+    [ -n "$route_slug" ] || route_slug="home"   # '/' slugs to nothing
+    name="${route_slug}-${width}x${height}"
     file="$OUT/$name.png"
     url="http://127.0.0.1:${PORT}/${fragment}"
     printf '  -> %-24s %sx%s\n' "$route" "$width" "$height"
-    npx --yes "playwright@${PLAYWRIGHT_VERSION}" screenshot \
-      --viewport-size="${width},${height}" \
-      --wait-for-timeout="$WAIT_MS" \
-      "$url" "$file" >/dev/null
-    size="$(wc -c < "$file")"
+    delay="$WAIT_MS"
+    attempt=0
+    min_bytes=$((MIN_KB * 1024))
+    while : ; do
+      selector_args=()
+      [ -n "$WAIT_FOR_SELECTOR" ] && selector_args=(--wait-for-selector "$WAIT_FOR_SELECTOR")
+      npx --yes "playwright@${PLAYWRIGHT_VERSION}" screenshot \
+        --viewport-size="${width},${height}" \
+        --wait-for-timeout="$delay" \
+        ${selector_args[@]+"${selector_args[@]}"} \
+        "$url" "$file" >/dev/null
+      size="$(wc -c < "$file")"
+      if [ "$size" -ge "$min_bytes" ] || [ "$attempt" -ge "$RETRIES" ]; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      delay=$((delay * 2))
+      [ "$delay" -le 60000 ] || delay=60000
+      printf '     .. only %s KB after %ss - retry %s with %ss\n' \
+        "$((size / 1024))" "$((delay / 2))" "$attempt" "$delay"
+    done
     printf '%s\t%s\t%s\t%s\n' "$name" "$route" "${width}x${height}" "$size" >> "$manifest"
-    if [ "$size" -lt 5120 ]; then
-      # A solid-colour canvas compresses to a couple of KB; that is the shape of
-      # a blank screen (plugin missing on web, route crashed, app still loading).
-      printf '     ! %s is only %s KB - possibly a blank screen\n' "$name.png" "$((size / 1024))"
+    if [ "$size" -lt "$min_bytes" ]; then
+      # A solid-colour canvas compresses to a couple of KB even after every
+      # retry; that is the shape of a blank screen - the app needs longer than
+      # 60 s, a platform-only plugin is missing on web, or the route threw.
+      printf '     ! %s is only %s KB after %ss - still blank, check the app\n' \
+        "$name.png" "$((size / 1024))" "$delay"
       small=$((small + 1))
     fi
     taken=$((taken + 1))

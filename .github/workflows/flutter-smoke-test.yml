@@ -162,7 +162,9 @@ jobs:
             --out /tmp/ui-smoke \
             --routes / \
             --viewports 390x844 \
-            --wait-ms 6000
+            --wait-ms 15000 \
+            --retries 3 \
+            --min-kb 5
 
       - name: Verify the PNG is a real 390x844 image
         run: |

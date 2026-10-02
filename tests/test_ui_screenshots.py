@@ -130,10 +130,22 @@ class OneCaptureScriptTests(unittest.TestCase):
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_capture_reports_a_blank_screen_instead_of_hiding_it(self) -> None:
+    def test_capture_retries_instead_of_publishing_a_blank_image(self) -> None:
+        """The first CI run of this script produced a solid white 390x844 PNG:
+        the shot was taken before a cold CanvasKit boot finished. A blank result
+        must grow the wait and say so, not pass itself off as the screen."""
         text = CAPTURE.read_text(encoding="utf-8")
-        self.assertIn("possibly a blank screen", text)
         self.assertIn("--wait-for-timeout", text)
+        self.assertIn("--retries", text)
+        self.assertIn("min_bytes", text)
+        self.assertIn("still blank, check the app", text)
+        # The default wait has to clear a cold CanvasKit boot (~15 s on CI).
+        self.assertRegex(text, r"(?m)^WAIT_MS=1[0-9]{4}$")
+
+    def test_the_home_route_gets_a_name(self) -> None:
+        """'/' slugs to an empty string; the first run wrote '-390x844.png'."""
+        text = CAPTURE.read_text(encoding="utf-8")
+        self.assertIn('[ -n "$route_slug" ] || route_slug="home"', text)
 
     def test_embed_never_fails_the_build(self) -> None:
         text = EMBED.read_text(encoding="utf-8")
