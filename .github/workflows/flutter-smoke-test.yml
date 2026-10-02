@@ -163,7 +163,7 @@ jobs:
             --routes / \
             --viewports 390x844 \
             --wait-ms 15000 \
-            --retries 3 \
+            --max-wait-ms 60000 \
             --min-kb 5
 
       - name: Verify the screenshots really rendered

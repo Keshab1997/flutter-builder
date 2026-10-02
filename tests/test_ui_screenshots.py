@@ -108,6 +108,25 @@ class OneCaptureScriptTests(unittest.TestCase):
             for flag in ("--build-dir", "--out", "--routes", "--viewports", "--wait-ms"):
                 self.assertIn(flag, text, f"{where} does not pass {flag}")
 
+    def test_callers_only_pass_flags_the_script_accepts(self) -> None:
+        """A stale flag is a runtime failure with an unhelpful exit code 2 - the
+        first version of this pipeline passed `--retries` after the script had
+        dropped it, and the job died before capturing anything."""
+        script = CAPTURE.read_text(encoding="utf-8")
+        accepted = set(re.findall(r"(?m)^\s+(--[a-z-]+)\)", script))
+        self.assertTrue(accepted, "no flags found in the script")
+        for path in (REUSABLE, SMOKE):
+            text = path.read_text(encoding="utf-8")
+            block = re.search(
+                r"capture-screenshots\.sh[^\n]*\n(?P<body>(?:\s+--[a-z-]+[^\n]*\n)+)",
+                text)
+            self.assertIsNotNone(block, f"{path.name} does not call the script")
+            used = set(re.findall(r"--[a-z-]+", block.group("body")))
+            self.assertTrue(used, f"{path.name} passes no flags")
+            unknown = sorted(used - accepted)
+            self.assertEqual(unknown, [],
+                             f"{path.name} passes flags the script rejects: {unknown}")
+
     def test_the_smoke_job_checks_pixels_not_bytes(self) -> None:
         """A white 390x844 PNG is 2.8 KB, so `len(data) > 5000` would have to be
         a guess either way; the manifest's colour count is the real signal."""
