@@ -178,6 +178,16 @@ class OneCaptureScriptTests(unittest.TestCase):
         # The default wait has to clear a cold CanvasKit boot (~15 s on CI).
         self.assertRegex(capture, r"(?m)^WAIT_MS=1[0-9]{4}$")
 
+    def test_locale_and_webgl_flags_are_set(self) -> None:
+        """Three CI runs failed on a white screenshot whose only clue was
+        `RangeError: Incorrect locale information provided` from the engine:
+        a headless browser with no locale cannot boot Flutter web."""
+        pages = PAGES.read_text(encoding="utf-8")
+        self.assertIn("--lang=en-US", pages)
+        self.assertIn("locale: 'en-US'", pages)
+        self.assertIn("--enable-unsafe-swiftshader", pages)
+        self.assertIn("LC_ALL", pages)
+
     def test_blank_is_decided_by_pixels_not_file_size(self) -> None:
         """Size cannot separate the two: a solid white 390x844 shot is 2.8 KB,
         a plain-but-correct page measured 4.4 KB with 15 colours."""

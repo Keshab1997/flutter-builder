@@ -187,7 +187,18 @@ async function main() {
   if (routes.length === 0) routes.push('/');
   if (viewports.length === 0) viewports.push('390x844');
 
-  const browser = await chromium.launch();
+  // Locale and WebGL flags are not optional here, they are the fix for a
+  // failure that took three CI runs to see: a headless Chromium reports no
+  // usable locale, so the Flutter engine throws
+  //   RangeError: Incorrect locale information provided
+  // while booting and never creates a canvas - a white screenshot with no
+  // visible explanation. --enable-unsafe-swiftshader is the software WebGL
+  // path Chromium now requires explicitly, so a runner without a GPU still
+  // paints. (Headless CI renders trusted content; that is what the flag is for.)
+  const browser = await chromium.launch({
+    args: ['--lang=en-US', '--enable-unsafe-swiftshader'],
+    env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
+  });
   const results = [];
 
   for (const viewport of viewports) {
@@ -197,7 +208,13 @@ async function main() {
       const url = `${args.url.replace(/\/$/, '')}/${fragment(route)}`;
       const file = path.join(args.out, `${slug(route)}-${width}x${height}.png`);
       const messages = [];
-      const context = await browser.newContext({ viewport: { width, height } });
+      // locale makes navigator.language a real tag instead of an empty
+      // string; see the launch() comment above.
+      const context = await browser.newContext({
+        viewport: { width, height },
+        locale: 'en-US',
+        extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
+      });
       const page = await context.newPage();
       page.on('console', (m) => messages.push(`console.${m.type()}: ${m.text()}`));
       page.on('pageerror', (e) => messages.push(`pageerror: ${e.message}`));
