@@ -3,7 +3,7 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.8.8
+DEFAULT_REF=v1.9.0
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
 FILES=(ci.yml manual-build.yml publish-release.yml web-preview.yml)
 
@@ -15,12 +15,12 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.8/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
   --app-name NAME   Display name for GitHub Releases (default: pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.8.8)
+  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.9.0)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first
   -h, --help        Show this help
@@ -145,10 +145,20 @@ trap 'rm -rf -- "$stage"' EXIT
   cat <<'YAML'
 name: Flutter CI — Format, Analyze & Test
 
-# Validates every branch and pull request. No Android artifacts on push.
+# Validates every pull request; on main it validates the merge result. The push
+# trigger is main-only on purpose: a feature branch with an open pull request
+# already runs through the pull_request event, and running both validated the
+# same commit twice under different concurrency groups.
 on:
   pull_request:
+    branches: [main]
   push:
+    branches: [main]
+    # Prose and store metadata cannot change a Dart build: skip the run.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "distribution/**"
   workflow_dispatch:
 
 permissions:
@@ -160,6 +170,9 @@ concurrency:
 
 jobs:
   ci:
+    # A draft pull request is a scratchpad: CI starts when it is marked ready
+    # for review, so iterating costs no runs at all.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 YAML
   printf '    uses: %s/flutter-build.yml@%s\n' "$REUSABLE" "$ref"
   cat <<'YAML'
@@ -269,8 +282,17 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 # Build and deployment -> Deploy from a branch -> gh-pages (root); the first
 # run creates the branch. Needs the web platform (flutter create --platforms
 # web .); plugins without web support will not work in the preview.
+#
+# The push trigger is main-only on purpose: a branch with an open pull request
+# already builds through the pull_request event, and running both fired two
+# deploys for one push against the shared gh-pages branch.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "distribution/**"
   pull_request:
   delete:
 

@@ -1,8 +1,8 @@
 name: Deploy Flutter Web Preview (GitHub Pages)
 
-# Builds the app for the web on every push and pull request and publishes it
-# to GitHub Pages under preview/<branch>, so you can test the app by opening a
-# URL in a browser instead of downloading and installing an APK.
+# Builds the app for the web on pull requests and on main, and publishes it to
+# GitHub Pages under preview/<branch>, so you can test the app by opening a URL
+# in a browser instead of downloading and installing an APK.
 #
 # One-time setup: Settings -> Pages -> Deploy from a branch -> gh-pages (root).
 # The first run creates the gh-pages branch.
@@ -11,9 +11,18 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 # `delete` event, so gh-pages does not keep a web bundle for every dead branch.
 # GitHub runs delete-triggered workflows from the default branch, so merge this
 # file before relying on that.
+#
+# The push trigger is main-only on purpose: a branch with an open pull request
+# already builds through the pull_request event, and running both fired two
+# deploys for one push against the shared gh-pages branch.
 
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "distribution/**"
   pull_request:
   delete:
 
@@ -24,10 +33,9 @@ permissions:
 # All previews of one repository share a single lane, because they share one
 # gh-pages branch. Every writer runs alone: the deploy action pushes with a
 # compare-and-swap and refuses a push when another run moved the branch in the
-# meantime ("cannot lock ref ... is expected"), and updating a branch that has an
-# open pull request fires a push run and a pull_request run at the same time.
-# Queueing also keeps a deleted branch's cleanup from cancelling, or being
-# cancelled by, the deploy of the default branch.
+# meantime ("cannot lock ref ... is expected"). Queueing also keeps a deleted
+# branch's cleanup from cancelling, or being cancelled by, the deploy of the
+# default branch.
 concurrency:
   group: web-preview
   cancel-in-progress: false
@@ -35,7 +43,7 @@ concurrency:
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.8
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.9.0
     with:
       # working-directory: apps/mobile   # if the app lives in a subfolder
       comment-on-pr: true
@@ -50,7 +58,7 @@ jobs:
   cleanup:
     # A deleted tag is ignored inside the reusable workflow.
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.8
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.9.0
     # A delete event leaves the event payload unreadable inside a called
     # workflow, so the caller hands the deleted ref over itself.
     with:

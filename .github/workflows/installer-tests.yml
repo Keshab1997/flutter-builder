@@ -5,11 +5,13 @@ on:
     paths:
       - scripts/**
       - tests/**
+      - agent-pack/**
       - .github/workflows/installer-tests.yml
   pull_request:
     paths:
       - scripts/**
       - tests/**
+      - agent-pack/**
       - .github/workflows/installer-tests.yml
   workflow_dispatch:
 

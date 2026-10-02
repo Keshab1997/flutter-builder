@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
+# The pin the installer writes into generated callers. Read from the script
+# so bumping the default ref never breaks these tests.
+PIN = re.search(r"^DEFAULT_REF=(\S+)$", SCRIPT.read_text(encoding="utf-8"), re.M).group(1)
 FILES = (
     "ci.yml",
     "manual-build.yml",
@@ -67,18 +71,18 @@ class InstallerTests(unittest.TestCase):
         self.assert_success(first)
         before = {name: self.installed(name) for name in FILES}
         for content in before.values():
-            self.assertIn("@v1.8.8", content)
+            self.assertIn(f"@{PIN}", content)
             self.assertIn('working-directory: "."', content)
         self.assertIn("code-coverage: true", before["ci.yml"])
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
-        self.assertIn("publish-release.yml@v1.8.8", before["publish-release.yml"])
+        self.assertIn(f"publish-release.yml@{PIN}", before["publish-release.yml"])
         self.assertFalse((self.repo / ".github/workflows/release.yml").exists())
-        self.assertIn("web-preview.yml@v1.8.8", before["web-preview.yml"])
+        self.assertIn(f"web-preview.yml@{PIN}", before["web-preview.yml"])
         self.assertIn("secrets: inherit", before["web-preview.yml"])
         self.assertIn("group: web-preview\n", before["web-preview.yml"])
         self.assertIn("cancel-in-progress: false", before["web-preview.yml"])
-        self.assertIn("preview-cleanup.yml@v1.8.8", before["web-preview.yml"])
+        self.assertIn(f"preview-cleanup.yml@{PIN}", before["web-preview.yml"])
         self.assertIn("branch-name: ${{ github.event.ref }}", before["web-preview.yml"])
         self.assertIn("set-about-link: true", before["web-preview.yml"])
         self.assertIn("app-id: ${{ vars.APP_ID }}", before["web-preview.yml"])
@@ -163,7 +167,7 @@ class InstallerTests(unittest.TestCase):
         target.write_text("# Custom CI, keep it\n", encoding="utf-8")
         result = self.run_installer("--force")
         self.assert_success(result)
-        self.assertIn("@v1.8.8", self.installed("ci.yml"))
+        self.assertIn(f"@{PIN}", self.installed("ci.yml"))
         backups = list((self.repo / ".github/flutter-builder-backups").glob("*/ci.yml"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(), "# Custom CI, keep it\n")
@@ -183,7 +187,7 @@ class InstallerTests(unittest.TestCase):
         self.assert_success(result)
         caller = self.installed("web-preview.yml")
         self.assertIn("  delete:", caller)
-        self.assertIn("preview-cleanup.yml@v1.8.8", caller)
+        self.assertIn(f"preview-cleanup.yml@{PIN}", caller)
         self.assertIn("branch-name: ${{ github.event.ref }}", caller)
         self.assertIn("set-about-link: true", caller)
         self.assertIn("app-id: ${{ vars.APP_ID }}", caller)
