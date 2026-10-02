@@ -17,13 +17,13 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 GitHub-এ থাকা Flutter app-এর directory থেকে Linux, macOS বা Windows Git Bash-এ চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.8/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/install.sh | bash
 ```
 
 Installer `.github/workflows/`-এ চারটি caller workflow বসায়। Monorepo-তে app-এর directory নির্দিষ্ট করুন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.8/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 Installer-এ Flutter SDK লাগে না। এটি git commit/push করে না, secrets তৈরি করে না, বা workflow run শুরু করে না। ফাইলগুলো দেখে তারপর commit/push করুন।
@@ -32,31 +32,60 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
 - `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
-- `--ref v1.8.8`: reusable workflow version pin; default `v1.8.8`
+- `--ref v1.9.0`: reusable workflow version pin; default `v1.9.0`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে
 
 Installer existing workflow ভিন্ন হলে নিরাপত্তার জন্য থেমে যায়; `--force` ছাড়া replace করে না। আগে দেখে নিন, কারণ custom workflow replace হলে আচরণ বদলাতে পারে।
 
-### আগে install করা project update করুন (bump-ref, v1.8.8+)
+### আগে install করা project update করুন (bump-ref, v1.9.0+)
 
 নতুন version tag এলে প্রতিটা project directory থেকে এক লাইন চালালেই সব caller-এর `@ref` নতুন tag-এ চলে যায়; custom job, comment আর inputs অক্ষত থাকে:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.8/scripts/bump-ref.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/bump-ref.sh | bash
 ```
 
 একসাথে অনেক project update করতে:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.8.8/scripts/bump-ref.sh -o /tmp/bump-ref.sh
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/bump-ref.sh -o /tmp/bump-ref.sh
 for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh --dry-run); done   # আগে দেখুন
 for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh); done            # তারপর লিখুন
 ```
 
-- `--ref TAG_OR_SHA`: নির্দিষ্ট pin দিন (default `v1.8.8`); `--dry-run`: কিছু না লিখে দেখায়
+- `--ref TAG_OR_SHA`: নির্দিষ্ট pin দিন (default `v1.9.0`); `--dry-run`: কিছু না লিখে দেখায়
 - শুধু `uses:` লাইনের `@ref` বদলায় — `install.sh --force`-এর মতো পুরো ফাইল replace করে না, তাই customize করা workflow-ও নিরাপদ
 - কোনো flutter-builder pin না পেলে ভুল directory ধরে error দেয়
+
+## Agent pack (v1.9.0+) — agent-দের কাজ দ্রুত করার জন্য
+
+AI agent দিয়ে কাজ করালে সময় নষ্ট হয় দুটো জায়গায়: push করার **আগে** ভুল ধরা পড়ে না, আর push-এর **পরে** CI-র ফল জানতে বারবার হাতে চেক করতে হয়। এই pack দুটোই কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.9.0/scripts/install-agent-pack.sh | bash
+```
+
+Repository root-এ যা বসে:
+
+| ফাইল | কী করে |
+|---|---|
+| `tool/preflight.py` | Dart code-এ অব্যবহৃত private widget/function, অব্যবহৃত optional constructor parameter ও অব্যবহৃত import খুঁজে বের করে — খরচ ১ সেকেন্ড (SDK ছাড়া), অথচ ঠিক এই ভুলগুলোই push-কে লাল করে |
+| `tool/ci_watch.py` | commit-এর GitHub Actions run-গুলো নিজে থেকে watch করে; শেষ হলে প্রতিটা workflow-র ফল আর fail করা job-এর আসল error লাইন ছাপায় (token: `--token-file`, `$GITHUB_TOKEN`/`$GH_TOKEN`, বা `gh auth token`) |
+| `AGENTS.md` | agent-দের playbook: এক change = এক push loop, CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
+
+`AGENTS.md` সবসময় **merge** হয়, replace নয়: `flutter-builder:agent-pack:start/end` marker-এর ভিতরের অংশটুকু update হয়, বাইরের সব লাইন (আপনার নিজের project notes) অপরিবর্তিত থাকে; ফাইল না থাকলে নতুন করে তৈরি হয়। Options: `--dry-run`, `--force`, `--help`।
+
+### push-প্রতি duplicate run বন্ধ (নতুন caller templates)
+
+একই commit আগে দুইবার validate হত: `push` আর `pull_request` আলাদা concurrency group-এ চলত, আর web preview lane (যা ইচ্ছাকৃতভাবে serialized) একটা আরেকটার পিছনে queue-তে দাঁড়াত। নতুন caller আর shared workflow-তে:
+
+- `push:` শুধু `main`-এ — feature branch-এর কাজ `pull_request` event থেকেই হয় (এক run, দুটো নয়)
+- **draft PR**-এ CI চলে না; *Ready for review* করলেই শুরু
+- শুধু লেখা/মেটাডেটা বদলালে (`**.md`, `docs/**`, `distribution/**`) কিছুই চলে না
+- shared `flutter-build.yml`-এ নতুন input `skip-draft-prs` (default `true`) — চাইলে caller থেকে বন্ধ করা যায়
+
+আগে install করা project-এ এই আচরণ চাইলে caller-এর `on:`/`if:` অংশ hand-merge করুন বা `install.sh --force` (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
 
 ## Build ও release
 
@@ -119,7 +148,7 @@ concurrency:
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.8.8
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.9.0
     with:
       working-directory: "."
       comment-on-pr: true
@@ -127,7 +156,7 @@ jobs:
 
   cleanup:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.8.8
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.9.0
     with:
       # delete event-এ payload called workflow-এ পড়া যায় না; তাই caller নিজেই
       # deleted ref-টা পাঠায় (এটা না দিলে cleanup চুপচাপ কিছুই মোছে না)।
@@ -171,7 +200,7 @@ PAT বানান: [fine-grained token](https://github.com/settings/personal-a
 Installer ব্যবহার না করলে `examples/project-workflows/` থেকে দরকারি YAML app repository-র `.github/workflows/`-এ কপি করুন। Production ব্যবহারে reusable workflow-গুলোকে version tag-এ pin করুন, যেমন:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.8
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.9.0
 ```
 
 `@main` development-এর জন্য চললেও release workflow-তে version tag বা commit SHA বেশি নির্ভরযোগ্য।
@@ -205,8 +234,11 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 - `.github/workflows/publish-release.yml` — reusable signed release workflow
 - `.github/workflows/web-preview.yml` — reusable web preview deployment
 - `scripts/install.sh` — caller workflow installer
+- `scripts/install-agent-pack.sh` — `tool/preflight.py`, `tool/ci_watch.py` ও managed `AGENTS.md` block বসায় (SDK ছাড়া)
+- `agent-pack/` — agent pack-এর canonical ফাইল, যা installer-এর ভিতরে embed করা (tests দুই কপি এক রাখে)
 - `scripts/doctor.sh` — app configuration checker
 - `examples/project-workflows/` — app repository-তে ব্যবহারের নমুনা workflow
 - `docs/` — signing ও secret setup নির্দেশিকা
+- `tests/` — installer, agent pack, preview cleanup ও CI trigger-এর unittest (Flutter SDK ছাড়াই চলে)
 
 License: [MIT](LICENSE).

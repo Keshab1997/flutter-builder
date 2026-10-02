@@ -43,6 +43,14 @@ on:
         required: false
         type: boolean
         default: true
+      skip-draft-prs:
+        description: >-
+          Skip validation while the caller's pull request is a draft; the run
+          starts when the PR is marked ready for review. Drafts are a
+          scratchpad, and iterating on one should not spend CI minutes.
+        required: false
+        type: boolean
+        default: true
       build-apk:
         description: Build a release APK
         required: false
@@ -295,6 +303,8 @@ on:
 jobs:
   validate-and-build:
     name: Validate and build Flutter app
+    # Draft pull requests are skipped when skip-draft-prs is on (the default).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -1385,7 +1395,7 @@ jobs:
   # channels so a breaking change on another channel is caught before release.
   prepare-matrix:
     name: Prepare Flutter channel matrix
-    if: inputs.test-matrix != ''
+    if: inputs.test-matrix != '' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
     runs-on: ubuntu-latest
     outputs:
       channels: ${{ steps.channels.outputs.channels }}
@@ -1408,7 +1418,7 @@ jobs:
   matrix-validate:
     name: Validate on ${{ matrix.flutter-channel }}
     needs: prepare-matrix
-    if: inputs.test-matrix != ''
+    if: inputs.test-matrix != '' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false || inputs.skip-draft-prs == false)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
