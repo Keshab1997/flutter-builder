@@ -210,5 +210,80 @@ class OneCaptureScriptTests(unittest.TestCase):
         self.assertIn("exit 0", text)
 
 
+class SmokeWorkflowTriggerTests(unittest.TestCase):
+    """A fix that does not re-run the smoke test is a fix nobody verified.
+
+    `flutter-smoke-test.yml` is the only place the screenshot pipeline runs
+    end to end. The workflow used to list just the workflow files under
+    `paths:`, so a commit that only changed `scripts/capture-pages.cjs` - the
+    headless-browser flags, of all things - did not start the workflow at all.
+    The pull request stayed red for an older reason and the fix looked
+    untested. Every repository file the workflow reads must therefore appear
+    in both `paths:` lists.
+    """
+
+    WORKFLOW_REFS = re.compile(r"(?:scripts|tests|agent-pack)/[A-Za-z0-9_.-]+")
+
+    def event_paths(self, text: str, event: str) -> list[str]:
+        block = re.search(
+            rf"(?ms)^  {event}:\n(.*?)(?=^  [a-z_]+:|^[a-z])", text)
+        self.assertIsNotNone(block, f"no {event}: block in the smoke workflow")
+        return re.findall(r"(?m)^      - (\S+)$", block.group(1))
+
+    def screenshot_job(self, text: str) -> str:
+        """The screenshots job only - the build job's install step is covered
+        by installer-tests.yml, and re-running a Flutter web build for every
+        `scripts/install.sh` edit would cost minutes for no extra signal."""
+        # The screenshots job is the last one, so the lookahead also has to
+        # accept the end of the file.
+        block = re.search(r"(?ms)^  screenshots:\n(.*?)(?=^  [a-z_]+:|^[a-z]|\Z)", text)
+        self.assertIsNotNone(block, "no screenshots job in the smoke workflow")
+        return block.group(1)
+
+    def referenced_files(self, text: str) -> set[str]:
+        """The `scripts/` files this text reads, and what those scripts read.
+
+        The job calls `capture-screenshots.sh`, which calls `capture-pages.cjs`
+        - the file the fix lived in - so following the chain one level further
+        is what turns "the job mentions the wrapper" into "the job depends on
+        the headless-browser flags". Files the workflow writes at run time (the
+        actionlint helper) are not in the repository and are dropped, and the
+        walk stays inside `scripts/`: `install.sh` is installer-tests.yml's
+        business and a Flutter web build should not re-run for it.
+        """
+        found: set[str] = set()
+        seen: set[str] = set()
+        todo = list(self.WORKFLOW_REFS.findall(text))
+        while todo:
+            name = todo.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            if not name.startswith("scripts/"):
+                continue
+            path = ROOT / name
+            if not path.is_file():
+                continue
+            found.add(name)
+            body = path.read_text(encoding="utf-8")
+            todo.extend(self.WORKFLOW_REFS.findall(body))
+            # capture-screenshots.sh runs `"$SCRIPT_DIR/capture-pages.cjs"`, so
+            # the next script is a bare basename, not a scripts/ path.
+            for sibling in re.findall(r"(?<![\w/.-])([\w.-]+\.(?:sh|cjs|bash|js|py))", body):
+                todo.append(f"scripts/{sibling}")
+        return found
+
+    def test_every_referenced_repository_file_triggers_the_workflow(self) -> None:
+        text = SMOKE.read_text(encoding="utf-8")
+        referenced = self.referenced_files(self.screenshot_job(text))
+        self.assertIn("scripts/capture-pages.cjs", referenced)
+
+    def test_the_capture_flag_fix_is_covered(self) -> None:
+        """The concrete regression: the locale/WebGL fix lives in the .cjs."""
+        for event in ("push", "pull_request"):
+            listed = self.event_paths(SMOKE.read_text(encoding="utf-8"), event)
+            self.assertIn("scripts/capture-pages.cjs", listed, event)
+
+
 if __name__ == "__main__":
     unittest.main()

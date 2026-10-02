@@ -18,6 +18,10 @@ on:
   push:
     branches: [main]
     paths:
+      # Everything the smoke test exercises, not just the workflow files: the
+      # screenshots job runs the shipped scripts, so a fix inside
+      # capture-pages.cjs (the headless-browser flags, for instance) must
+      # re-run this workflow instead of silently skipping it.
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
@@ -25,6 +29,9 @@ on:
       - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
       - scripts/capture-screenshots.sh
+      - scripts/capture-pages.cjs
+      - scripts/embed-screenshots.sh
+      - tests/test_ui_screenshots.py
   pull_request:
     paths:
       - .github/workflows/flutter-build.yml
@@ -34,6 +41,9 @@ on:
       - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
       - scripts/capture-screenshots.sh
+      - scripts/capture-pages.cjs
+      - scripts/embed-screenshots.sh
+      - tests/test_ui_screenshots.py
   schedule:
     # Weekly, even when nothing changes here: catches upstream Flutter /
     # Gradle / runner-image breakage before callers hit it.
