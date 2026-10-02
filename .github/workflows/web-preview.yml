@@ -167,12 +167,39 @@ jobs:
           # Keep other branches' previews alive next to this one.
           keep_files: true
 
+      # The preview URL otherwise lives only in this run's summary, which
+      # nobody opens. One index page per repository - …/<repo>/preview/ - is
+      # what makes the previews findable; it is refreshed by every deploy, and
+      # a failure here must never fail a deploy that already published.
+      - name: Check out this builder (for the preview hub script)
+        if: inputs.destination-dir == ''
+        uses: actions/checkout@v5
+        with:
+          repository: Keshab1997/flutter-builder
+          # The hub script ships with the preview workflow, so both come from
+          # the same tag (tests/test_preview_hub.py holds the pins in step).
+          ref: v1.10.0
+          path: .flutter-builder
+
+      - name: Refresh the preview hub index
+        if: inputs.destination-dir == ''
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/preview-hub.sh" \
+            --branch-dir "${{ steps.paths.outputs.dest-dir }}"
+
       - name: Add preview URL to the step summary
         run: |
           {
             echo "## Web preview"
             echo ""
             echo "Open in a browser: ${{ steps.paths.outputs.url }}"
+            if [ "${{ inputs.destination-dir }}" = "" ]; then
+              echo ""
+              echo "All previews: https://${{ github.repository_owner }}.github.io/${GITHUB_REPOSITORY#*/}/preview/"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment preview URL on the pull request
