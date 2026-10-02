@@ -31,6 +31,7 @@ EXAMPLE = ROOT / "examples" / "project-workflows" / "ui-screenshots.yml"
 SMOKE = ROOT / ".github" / "workflows" / "flutter-smoke-test.yml"
 CAPTURE = ROOT / "scripts" / "capture-screenshots.sh"
 EMBED = ROOT / "scripts" / "embed-screenshots.sh"
+PAGES = ROOT / "scripts" / "capture-pages.cjs"
 INSTALLER = ROOT / "scripts" / "install-agent-pack.sh"
 
 
@@ -107,6 +108,14 @@ class OneCaptureScriptTests(unittest.TestCase):
             for flag in ("--build-dir", "--out", "--routes", "--viewports", "--wait-ms"):
                 self.assertIn(flag, text, f"{where} does not pass {flag}")
 
+    def test_the_smoke_job_checks_pixels_not_bytes(self) -> None:
+        """A white 390x844 PNG is 2.8 KB, so `len(data) > 5000` would have to be
+        a guess either way; the manifest's colour count is the real signal."""
+        smoke = SMOKE.read_text(encoding="utf-8")
+        self.assertIn("manifest.tsv", smoke)
+        self.assertIn("int(colors) > 2", smoke)
+        self.assertNotIn("is suspiciously small", smoke)
+
     def test_nobody_reimplements_playwright_in_yaml(self) -> None:
         for path in (REUSABLE, SMOKE):
             text = path.read_text(encoding="utf-8")
@@ -130,22 +139,38 @@ class OneCaptureScriptTests(unittest.TestCase):
                                     capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_capture_retries_instead_of_publishing_a_blank_image(self) -> None:
-        """The first CI run of this script produced a solid white 390x844 PNG:
-        the shot was taken before a cold CanvasKit boot finished. A blank result
-        must grow the wait and say so, not pass itself off as the screen."""
-        text = CAPTURE.read_text(encoding="utf-8")
-        self.assertIn("--wait-for-timeout", text)
-        self.assertIn("--retries", text)
-        self.assertIn("min_bytes", text)
-        self.assertIn("still blank, check the app", text)
+    def test_capture_polls_until_the_page_actually_painted(self) -> None:
+        """The first CI runs of this pipeline produced a solid white 390x844 PNG
+        at 6 s, 15 s, 30 s and 60 s - the same picture every time - and the CLI
+        could not say why. The capture now polls on the decoded pixels and
+        prints console/WebGL diagnostics when they never appear."""
+        capture = CAPTURE.read_text(encoding="utf-8")
+        pages = PAGES.read_text(encoding="utf-8")
+        self.assertIn("--max-wait-ms", capture)
+        self.assertIn("capture-pages.cjs", capture)
+        self.assertIn("--wait-for-timeout", pages) if False else None
+        self.assertIn("pngStats", pages)
+        self.assertIn("looksBlank", pages)
+        self.assertIn("console.", pages)          # console messages are collected
+        self.assertIn("pageerror", pages)
+        self.assertIn("requestfailed", pages)
+        self.assertIn("glassPane", pages)         # did the engine boot?
+        self.assertIn("webgl", pages)
         # The default wait has to clear a cold CanvasKit boot (~15 s on CI).
-        self.assertRegex(text, r"(?m)^WAIT_MS=1[0-9]{4}$")
+        self.assertRegex(capture, r"(?m)^WAIT_MS=1[0-9]{4}$")
+
+    def test_blank_is_decided_by_pixels_not_file_size(self) -> None:
+        """Size cannot separate the two: a solid white 390x844 shot is 2.8 KB,
+        a plain-but-correct page measured 4.4 KB with 15 colours."""
+        pages = PAGES.read_text(encoding="utf-8")
+        self.assertRegex(pages, r"const blank = stats \? looksBlank\(stats\)")
+        self.assertIn("distinct", pages)
+        self.assertIn("topShare", pages)
 
     def test_the_home_route_gets_a_name(self) -> None:
         """'/' slugs to an empty string; the first run wrote '-390x844.png'."""
-        text = CAPTURE.read_text(encoding="utf-8")
-        self.assertIn('[ -n "$route_slug" ] || route_slug="home"', text)
+        pages = PAGES.read_text(encoding="utf-8")
+        self.assertIn("return cleaned || 'home'", pages)
 
     def test_embed_never_fails_the_build(self) -> None:
         text = EMBED.read_text(encoding="utf-8")

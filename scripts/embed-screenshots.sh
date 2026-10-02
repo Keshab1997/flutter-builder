@@ -115,7 +115,7 @@ comment_file="$(mktemp)"
   printf '## 📱 UI screenshots (`%s`)\n\n' "$target"
   printf 'Built from `%s`. Click one to open it full size.\n\n' "$short_sha"
   printf '| screen | viewport | size | image |\n|---|---|---|---|\n'
-  while IFS=$'\t' read -r name route viewport size; do
+  while IFS=$'\t' read -r name route viewport size _colors _share; do
     [ -n "$name" ] || continue
     printf '| `%s` | %s | %s KB | <img src="https://raw.githubusercontent.com/%s/%s/%s/%s.png" width="%s" alt="%s"> |\n' \
       "$route" "$viewport" "$((size / 1024))" "$GITHUB_REPOSITORY" "$BRANCH" "$target" \

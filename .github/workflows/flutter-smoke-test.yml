@@ -166,22 +166,35 @@ jobs:
             --retries 3 \
             --min-kb 5
 
-      - name: Verify the PNG is a real 390x844 image
+      - name: Verify the screenshots really rendered
         run: |
           python3 - <<'PY'
           import pathlib
           import struct
 
-          pngs = sorted(pathlib.Path("/tmp/ui-smoke").glob("*.png"))
+          out = pathlib.Path("/tmp/ui-smoke")
+          pngs = sorted(out.glob("*.png"))
           assert pngs, "no PNG was captured"
-          for path in pngs:
+
+          # The manifest carries the decoded pixel statistics, because a solid
+          # white 390x844 screenshot is 2.8 KB and a plain-but-correct page is
+          # 4.4 KB - file size cannot tell "rendered" from "never painted".
+          rows = [line.split("\t") for line in
+                  (out / "manifest.tsv").read_text().splitlines() if line.strip()]
+          assert rows, "the manifest is empty"
+          for name, route, viewport, size, colors, share in rows:
+              path = out / f"{name}.png"
+              assert path.is_file(), f"{name}.png is missing"
               data = path.read_bytes()
               assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path} is not a PNG"
               # PNG IHDR: width and height are big-endian uint32 at 16 and 20.
               width, height = struct.unpack(">II", data[16:24])
               assert (width, height) == (390, 844), f"{path} is {width}x{height}"
-              assert len(data) > 5000, f"{path} is suspiciously small ({len(data)} bytes)"
-              print(f"{path.name}: {width}x{height}, {len(data) // 1024} KB")
+              assert int(colors) > 2, (
+                  f"{name} is a flat {colors}-colour screen: the app never painted. "
+                  f"See the capture step above for console errors and WebGL state.")
+              print(f"{name}.png: {width}x{height}, {int(size) // 1024} KB, "
+                    f"{colors} colours (top colour {share})")
           PY
 
       - name: Upload what the pipeline produced
