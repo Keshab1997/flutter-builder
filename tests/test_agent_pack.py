@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-agent-pack.sh"
 PACK = ROOT / "agent-pack"
-VERSION = "v1.9.0"
+VERSION = "v1.9.1"
 
 PUBSPEC = """name: demo_app
 version: 1.0.0+1
@@ -198,14 +198,14 @@ class InstallerTests(unittest.TestCase):
     def test_old_managed_block_is_replaced_in_place(self) -> None:
         self.flutter_app()
         self.assert_success(self.run_installer())
-        stale = self.agents_md().replace(HED + " v1.9.0", HED + " v0.0.1")
+        stale = self.agents_md().replace(f"{HED} {VERSION}", f"{HED} v0.0.1")
         stale += "\n## My own notes\n\nKeep me.\n"
         (self.repo / "AGENTS.md").write_text(stale, encoding="utf-8")
         result = self.run_installer()
         self.assert_success(result)
         self.assertIn("Will update (managed block)", result.stdout)
         agents = self.agents_md()
-        self.assertIn(HED + " v1.9.0", agents)
+        self.assertIn(f"{HED} {VERSION}", agents)
         self.assertNotIn("v0.0.1", agents)
         self.assertEqual(agents.count(HED), 1)
         self.assertEqual(agents.count(TAIL), 1)

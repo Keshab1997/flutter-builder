@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.8.8
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.9.1
     with:
       app-name: My Flutter App
       release-draft: ${{ inputs.draft }}
