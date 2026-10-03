@@ -50,7 +50,7 @@ distribution/whatsnew/whatsnew-en-US
 distribution/whatsnew/whatsnew-bn-BD
 ```
 
-প্রতিটি run-এর আগে এই ফাইলগুলোতে সেই release-এর আসল পরিবর্তন সংক্ষেপে লিখে commit/push করুন। Locale filename হবে `whatsnew-<BCP-47 locale>`—যেমন `whatsnew-en-US`। Notes directory workflow-তে `play-whats-new-directory` দিয়ে সেট করা আছে। Sample caller `@v1.12.1` pin করে — `play-whats-new-directory` input এই tag থেকেই আছে। পুরোনো tag (যেমন `@v1.8.6`)-এ এই input নেই, তাই caller ও wrapper সবসময় একই tag-এ pin করুন।
+প্রতিটি run-এর আগে এই ফাইলগুলোতে সেই release-এর আসল পরিবর্তন সংক্ষেপে লিখে commit/push করুন। Locale filename হবে `whatsnew-<BCP-47 locale>`—যেমন `whatsnew-en-US`। Notes directory workflow-তে `play-whats-new-directory` দিয়ে সেট করা আছে। Sample caller `@v1.13.0` pin করে — `play-whats-new-directory` input এই tag থেকেই আছে। পুরোনো tag (যেমন `@v1.8.6`)-এ এই input নেই, তাই caller ও wrapper সবসময় একই tag-এ pin করুন।
 
 ## ৫. একবারে GitHub Release + Play Internal testing
 

@@ -872,7 +872,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.12.1
+          ref: v1.13.0
           path: .flutter-builder
 
       - name: Pre-flight doctor

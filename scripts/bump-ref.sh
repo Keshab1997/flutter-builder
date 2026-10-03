@@ -6,7 +6,7 @@
 # local change. Self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.12.1
+DEFAULT_REF=v1.13.0
 REUSABLE='Keshab1997/flutter-builder/.github/workflows/'
 # sed pattern: literal repo path with dots escaped
 SED_PREFIX='Keshab1997/flutter-builder/\.github/workflows/'
@@ -19,11 +19,11 @@ usage() {
 Bump Keshab1997/flutter-builder pins in an existing Flutter app repository.
 
 Run from the project directory (or anywhere inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.1/scripts/bump-ref.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.13.0/scripts/bump-ref.sh | bash
 
 Options when running a downloaded/local script:
-  --ref REF   New pin: a version tag (e.g. v1.12.1) or a 40-character commit
-              SHA (default: v1.12.1)
+  --ref REF   New pin: a version tag (e.g. v1.13.0) or a 40-character commit
+              SHA (default: v1.13.0)
   --dry-run   Show what would change without writing files
   -h, --help  Show this help
 
@@ -53,7 +53,7 @@ done
 # or expressions can end up inside a workflow file.
 if [[ ! "$ref" =~ ^v[0-9]+(\.[0-9]+){1,2}(-[A-Za-z0-9][A-Za-z0-9.-]*)?$ &&
       ! "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-  fail "Invalid --ref '$ref'. Use a version tag (e.g. v1.12.1) or a 40-character commit SHA."
+  fail "Invalid --ref '$ref'. Use a version tag (e.g. v1.13.0) or a 40-character commit SHA."
 fi
 
 invoked_from="$(pwd -P)"

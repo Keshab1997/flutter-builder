@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the flutter-builder agent pack into an existing Flutter repository.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.1/scripts/install-agent-pack.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.13.0/scripts/install-agent-pack.sh | bash
 #
 # What it installs (repository root, never touches anything else):
 #   tool/preflight.py    Dart checks that need no Flutter SDK: dead code,
@@ -27,7 +27,7 @@
 # curl | bash. It never adds GitHub secrets and never runs git.
 set -euo pipefail
 
-PACK_VERSION=v1.12.1
+PACK_VERSION=v1.13.0
 REPO=Keshab1997/flutter-builder
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/${PACK_VERSION}"
 
@@ -41,7 +41,7 @@ tool/agent_loop.py, tool/see_screen.py and a managed AGENTS.md block) into a Flu
 No Flutter SDK needed.
 
 Run from anywhere inside the repository:
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.1/scripts/install-agent-pack.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.13.0/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything
@@ -1588,7 +1588,7 @@ cat > "$stage/agents-template.md" <<'AGENT_PACK_AGENTS_MD_EOF'
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep the work moving without burning CI.
 
-<!-- flutter-builder:agent-pack:start v1.12.1 -->
+<!-- flutter-builder:agent-pack:start v1.13.0 -->
 ## Rule #1 — CI is manual; preflight is your check
 
 This repository runs CI **only when the human dispatches it** (Actions → *Flutter

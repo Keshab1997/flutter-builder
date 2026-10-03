@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.12.1
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.13.0
     with:
       flutter-channel: stable
       run-format-check: true

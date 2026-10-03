@@ -178,7 +178,7 @@ jobs:
           repository: Keshab1997/flutter-builder
           # The hub script ships with the preview workflow, so both come from
           # the same tag (tests/test_preview_hub.py holds the pins in step).
-          ref: v1.12.1
+          ref: v1.13.0
           path: .flutter-builder
 
       - name: Refresh the preview hub index
