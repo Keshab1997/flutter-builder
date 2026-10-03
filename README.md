@@ -17,13 +17,13 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 GitHub-এ থাকা Flutter app-এর directory থেকে Linux, macOS বা Windows Git Bash-এ চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.11.3/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.0/scripts/install.sh | bash
 ```
 
 Installer `.github/workflows/`-এ চারটি caller workflow বসায়। Monorepo-তে app-এর directory নির্দিষ্ট করুন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.11.3/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.0/scripts/install.sh | bash -s -- --app-dir apps/mobile --app-name "My App"
 ```
 
 Installer-এ Flutter SDK লাগে না। এটি git commit/push করে না, secrets তৈরি করে না, বা workflow run শুরু করে না। ফাইলগুলো দেখে তারপর commit/push করুন।
@@ -32,7 +32,7 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
 - `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
-- `--ref v1.11.3`: reusable workflow version pin; default `v1.11.3`
+- `--ref v1.12.0`: reusable workflow version pin; default `v1.12.0`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে
 
@@ -43,18 +43,18 @@ Installer existing workflow ভিন্ন হলে নিরাপত্ত�
 নতুন version tag এলে প্রতিটা project directory থেকে এক লাইন চালালেই সব caller-এর `@ref` নতুন tag-এ চলে যায়; custom job, comment আর inputs অক্ষত থাকে:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.11.3/scripts/bump-ref.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.0/scripts/bump-ref.sh | bash
 ```
 
 একসাথে অনেক project update করতে:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.11.3/scripts/bump-ref.sh -o /tmp/bump-ref.sh
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.0/scripts/bump-ref.sh -o /tmp/bump-ref.sh
 for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh --dry-run); done   # আগে দেখুন
 for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh); done            # তারপর লিখুন
 ```
 
-- `--ref TAG_OR_SHA`: নির্দিষ্ট pin দিন (default `v1.11.3`); `--dry-run`: কিছু না লিখে দেখায়
+- `--ref TAG_OR_SHA`: নির্দিষ্ট pin দিন (default `v1.12.0`); `--dry-run`: কিছু না লিখে দেখায়
 - v1.9.0 বা তার আগের bump-ref-এর default ছিল `v1.8.8` — তাই পুরোনো version থেকে চালালে `--ref` স্পষ্ট দিন
 - শুধু `uses:` লাইনের `@ref` বদলায় — `install.sh --force`-এর মতো পুরো ফাইল replace করে না, তাই customize করা workflow-ও নিরাপদ
 - কোনো flutter-builder pin না পেলে ভুল directory ধরে error দেয়
@@ -64,7 +64,7 @@ for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh); done            #
 AI agent দিয়ে কাজ করালে সময় নষ্ট হয় দুটো জায়গায়: push করার **আগে** ভুল ধরা পড়ে না, আর push-এর **পরে** CI-র ফল জানতে বারবার হাতে চেক করতে হয়। এই pack দুটোই কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.11.3/scripts/install-agent-pack.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.0/scripts/install-agent-pack.sh | bash
 ```
 
 Repository root-এ যা বসে:
@@ -128,7 +128,7 @@ Agent কোড বদলাতে পারে, কিন্তু অ্যা
 ```yaml
 jobs:
   preview:
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.11.3
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.12.0
     with:
       working-directory: "."
       comment-on-pr: true
@@ -146,7 +146,7 @@ jobs:
 - ছবি থাকে `ui-screenshots` নামের একটা আলাদা branch-এ — GitHub markdown-এ ছবি এমবেড করতে হলে এমন public URL লাগে, artifact-এর লিংকে লগইন দরকার।
 
 ```yaml
-    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.11.3
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.12.0
     with:
       routes: "/,/settings"          # hash strategy: '/settings' → '#/settings'
       viewports: "390x844,768x1024"  # ফোন + ছোট ট্যাবলেট
@@ -234,7 +234,7 @@ concurrency:
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.11.3
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.12.0
     with:
       working-directory: "."
       comment-on-pr: true
@@ -242,7 +242,7 @@ jobs:
 
   cleanup:
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.11.3
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.12.0
     with:
       # delete event-এ payload called workflow-এ পড়া যায় না; তাই caller নিজেই
       # deleted ref-টা পাঠায় (এটা না দিলে cleanup চুপচাপ কিছুই মোছে না)।
@@ -286,7 +286,7 @@ PAT বানান: [fine-grained token](https://github.com/settings/personal-a
 Installer ব্যবহার না করলে `examples/project-workflows/` থেকে দরকারি YAML app repository-র `.github/workflows/`-এ কপি করুন। Production ব্যবহারে reusable workflow-গুলোকে version tag-এ pin করুন, যেমন:
 
 ```yaml
-uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.11.3
+uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.12.0
 ```
 
 `@main` development-এর জন্য চললেও release workflow-তে version tag বা commit SHA বেশি নির্ভরযোগ্য।

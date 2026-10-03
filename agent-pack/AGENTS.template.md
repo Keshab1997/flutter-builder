@@ -3,7 +3,7 @@
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep one change loop short.
 
-<!-- flutter-builder:agent-pack:start v1.11.3 -->
+<!-- flutter-builder:agent-pack:start v1.12.0 -->
 ## Rule #1 — CI verifies, you never push a guess
 
 This sandbox usually has **no Flutter SDK**, and even when it does, the local
@@ -66,6 +66,33 @@ It refuses, before touching the repository, when
 Exit codes: `0` pushed (and green when watched), `1` CI red or push failed,
 `2` refused before changing anything. An `--amend` push uses
 `--force-with-lease`, never a bare `--force`.
+
+## Seeing a screen — look, do not guess
+
+You cannot run the app, but you can *see* it. `tool/see_screen.py` asks CI to
+build the app for web and photograph the routes you name, waits for the run,
+downloads the images and prints their paths. Then open them — with your image
+tool, not your imagination:
+
+```bash
+python3 tool/see_screen.py --route /settings           # one screen
+python3 tool/see_screen.py --route / --route /profile  # several, one build
+python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first frame
+```
+
+* **Use it before and after a UI change.** Before: see what the screen looks
+  like now. After: see what your change did. A green CI says the code compiles;
+  only the picture says the layout is right.
+* The routes are the app's own (`/settings`, `/profile`) — the same names the
+  app navigates to. A screen behind a login or several taps cannot be reached
+  this way; ask the human for a screenshot of that one instead.
+* It is the **web** build: layout, colours and text are faithful; fonts and
+  platform widgets differ, and camera/bluetooth/notification plugins render as a
+  blank screen. The script says so when the pixels are flat — believe it rather
+  than "fixing" the capture.
+* `--out` defaults to `.agent-screens/` (git-ignored). The images are throwaway
+  artifacts: never commit them, and never use one as a test fixture.
+* No token? `gh auth login` once, or pass `--token-file`.
 
 ## What a push costs here (and why it is already cheap)
 

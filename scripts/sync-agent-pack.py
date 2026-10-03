@@ -12,7 +12,7 @@ Edit `agent-pack/`, then run this:
     python3 scripts/sync-agent-pack.py           # rewrite the embedded payload
     python3 scripts/sync-agent-pack.py --check   # exit 1 when out of sync (CI-safe)
 
-Only the bodies of the four heredocs change; nothing else in the installer is
+Only the bodies of the five heredocs change; nothing else in the installer is
 touched.
 """
 from __future__ import annotations
@@ -31,6 +31,7 @@ PAYLOAD = {
     "preflight.py": "AGENT_PACK_PREFLIGHT_PY_EOF",
     "ci_watch.py": "AGENT_PACK_CI_WATCH_PY_EOF",
     "agent_loop.py": "AGENT_PACK_AGENT_LOOP_PY_EOF",
+    "see_screen.py": "AGENT_PACK_SEE_SCREEN_PY_EOF",
     "AGENTS.template.md": "AGENT_PACK_AGENTS_MD_EOF",
 }
 

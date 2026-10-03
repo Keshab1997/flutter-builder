@@ -3,14 +3,45 @@ name: Flutter UI screenshots
 # Drop this file into <app>/.github/workflows/ and every pull request gets
 # pictures of the changed screens without anyone installing the app.
 #
-# The app needs web support (`web/` in the repository, or add it once with
-# `flutter create --platforms=web .`). Apps that use platform-only plugins
+# It also runs on demand: Actions -> "Flutter UI screenshots" -> Run workflow,
+# type the routes you want photographed (`/settings,/profile`). An agent can do
+# the same from the command line - `python3 tool/see_screen.py --route /settings`
+# from the flutter-builder agent pack dispatches this, waits and downloads the
+# images, so a change can be *looked at* instead of guessed at.
+#
+# The app needs web support (`web/` in the repository, or set
+# `generate-web-platform: true` below). Apps that use platform-only plugins
 # (camera, bluetooth, local notifications) will not render on web - the capture
-# step reports that instead of showing an empty screen.
+# step reports a blank screen instead of showing one silently.
 
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      routes:
+        description: Comma separated app routes to photograph, e.g. /settings,/profile
+        required: false
+        default: "/"
+      viewports:
+        description: Comma separated WxH viewports
+        required: false
+        default: "390x844,768x1024"
+      wait-ms:
+        description: Milliseconds to let the app settle before each screenshot
+        required: false
+        default: "8000"
+      dart-defines:
+        description: Compile-time defines, one KEY=VALUE per line (never secrets)
+        required: false
+        default: ""
+      note:
+        description: Free text shown in the run name (see_screen.py sets this)
+        required: false
+        default: ""
+
+# The note makes a dispatched run findable: see_screen.py searches for the run
+# it just started by this title instead of guessing from timestamps.
+run-name: Flutter UI screenshots${{ inputs.note && format(' — {0}', inputs.note) || '' }}
 
 # Both are required: `contents: write` to push the images to the
 # `ui-screenshots` branch, `pull-requests: write` to comment them.
@@ -27,24 +58,24 @@ jobs:
     # A draft pull request is a scratchpad: screenshots start when it is marked
     # ready for review, so iterating costs nothing.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # v1.11.3 is the first release that ships this workflow (older tags do not
+    # v1.12.0 is the first release that ships this workflow (older tags do not
     # contain the file). Move this pin forward with scripts/bump-ref.sh.
-    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.11.3
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.12.0
     with:
       flutter-channel: stable
       # List the screens this app actually has. `/` is the home screen; for
       # anything deeper, give the route the app navigates to (`/settings`,
-      # `/profile`) or wire up an integration test.
-      routes: "/"
-      # A phone and a small tablet. Older/smaller screens are where layout
-      # breaks, so both are worth a look.
-      viewports: "390x844,768x1024"
+      # `/profile`) or wire up an integration test. A dispatched run overrides
+      # this with the routes typed into the form / passed by see_screen.py.
+      routes: ${{ inputs.routes || '/' }}
+      viewports: ${{ inputs.viewports || '390x844,768x1024' }}
+      # `wait-ms` is a number in the reusable workflow, so the form's string is
+      # converted; the hyphenated input names need the bracket syntax.
+      wait-ms: ${{ fromJSON(inputs['wait-ms'] || '8000') }}
+      dart-defines: ${{ inputs['dart-defines'] || '' }}
       # Apps that have never been built for the web have no web/ folder and
       # `flutter build web` would fail. Set this once and the workflow generates
       # the folder inside its own checkout (`flutter create --platforms=web .`):
       # generate-web-platform: true
-      # Give Firebase/Supabase-configured apps the same values the build uses,
-      # otherwise the screenshot is of a crash screen:
-      # dart-defines: |
-      #   API_BASE_URL=https://api.example.com
       embed-in-pr: true
+    secrets: inherit

@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-agent-pack.sh"
 PACK = ROOT / "agent-pack"
-VERSION = "v1.11.3"
+VERSION = "v1.12.0"
 
 PUBSPEC = """name: demo_app
 version: 1.0.0+1
@@ -63,6 +63,12 @@ class PayloadParityTests(unittest.TestCase):
         self.assertEqual(
             extract_payload("AGENT_PACK_AGENT_LOOP_PY_EOF"),
             (PACK / "agent_loop.py").read_text(encoding="utf-8"),
+        )
+
+    def test_embedded_see_screen_matches_agent_pack(self) -> None:
+        self.assertEqual(
+            extract_payload("AGENT_PACK_SEE_SCREEN_PY_EOF"),
+            (PACK / "see_screen.py").read_text(encoding="utf-8"),
         )
 
     def test_embedded_agents_template_matches_agent_pack(self) -> None:
@@ -139,6 +145,10 @@ class InstallerTests(unittest.TestCase):
             (self.repo / "tool/agent_loop.py").read_text(encoding="utf-8"),
             (PACK / "agent_loop.py").read_text(encoding="utf-8"),
         )
+        self.assertEqual(
+            (self.repo / "tool/see_screen.py").read_text(encoding="utf-8"),
+            (PACK / "see_screen.py").read_text(encoding="utf-8"),
+        )
         agents = self.agents_md()
         self.assertTrue(agents.startswith("# AGENTS.md — demo_app"), agents[:80])
         self.assertEqual(agents.count(HED), 1)
@@ -163,6 +173,12 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertEqual(loop_help.returncode, 0, loop_help.stderr)
         self.assertIn("--draft-pr", loop_help.stdout)
+        see_help = subprocess.run(
+            ["python3", "tool/see_screen.py", "--help"], cwd=self.repo,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(see_help.returncode, 0, see_help.stderr)
+        self.assertIn("--route", see_help.stdout)
 
     def test_rerun_is_idempotent_and_changes_nothing(self) -> None:
         self.flutter_app()

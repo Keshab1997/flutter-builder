@@ -98,6 +98,57 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn("if: always()", match.group("body"))
 
 
+class OnDemandCaptureTests(unittest.TestCase):
+    """A screen nobody is changing still has to be lookable-at.
+
+    Pull requests photograph `/`, which is not where the problem usually is.
+    The caller therefore accepts the same knobs through `workflow_dispatch`, so
+    a human can type `/settings` into the Actions form and an agent can run
+    `python3 tool/see_screen.py --route /settings` (it dispatches, waits and
+    downloads). Both paths need three things this class pins down: the inputs
+    exist, they are forwarded with the bracket syntax hyphenated names require,
+    and the run carries a title that identifies it.
+    """
+
+    def caller(self) -> str:
+        return EXAMPLE.read_text(encoding="utf-8")
+
+    def test_the_form_accepts_the_knobs_a_human_types(self) -> None:
+        text = self.caller()
+        for name in ("routes", "viewports", "wait-ms", "dart-defines", "note"):
+            self.assertIn(f"      {name}:", text, f"{name} is not a dispatch input")
+
+    def test_the_inputs_are_forwarded_to_the_reusable_workflow(self) -> None:
+        text = self.caller()
+        # Hyphenated names are not valid property syntax in expressions, and the
+        # failure is a YAML/expression error at run time - not obvious at all.
+        self.assertIn("${{ inputs.routes || '/' }}", text)
+        self.assertIn("${{ inputs.viewports || '390x844,768x1024' }}", text)
+        self.assertIn("fromJSON(inputs['wait-ms'] || '8000')", text)
+        self.assertIn("${{ inputs['dart-defines'] || '' }}", text)
+        # A pull request has no dispatch inputs: every fallback must be there,
+        # or the PR runs that used to work start failing.
+        for name in ("wait-ms", "dart-defines"):
+            self.assertNotIn(f"inputs.{name}", text,
+                             f"inputs.{name} is invalid expression syntax - use inputs['{name}']")
+        self.assertEqual(text.count("inputs['"), 2, "bracket syntax drifted")
+
+    def test_the_run_says_which_screen_it_is_about(self) -> None:
+        text = self.caller()
+        self.assertIn("run-name:", text)
+        self.assertIn("format(' — {0}', inputs.note)", text)
+
+    def test_the_pack_ships_the_tool_that_drives_this(self) -> None:
+        tool = ROOT / "agent-pack" / "see_screen.py"
+        self.assertTrue(tool.is_file(), "see_screen.py left the pack")
+        body = tool.read_text(encoding="utf-8")
+        self.assertIn("ui-screenshots.yml", body)
+        self.assertIn("workflow_dispatch", body)
+        # The AGENTS playbook must point at it, or agents never learn it exists.
+        template = (ROOT / "agent-pack" / "AGENTS.template.md").read_text(encoding="utf-8")
+        self.assertIn("see_screen.py", template)
+
+
 class ManifestSummaryTests(unittest.TestCase):
     """The table at the end of a run must survive the manifest changing shape.
 
