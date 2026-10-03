@@ -89,8 +89,15 @@ python3 scripts/sync-agent-pack.py --check    # exit 1 when out of sync (CI-safe
 ```
 
 - `PACK_VERSION` (top of `install-agent-pack.sh`) is the marker consumers see
-  in their managed block. **Bump it whenever the pack's contents change**, or a
-  re-install silently keeps the old text and the marker lies about it.
+  in their managed block — but it is **not** a "content changed" counter, and
+  bumping it here alone breaks the build: three pin-drift tests
+  (`test_preview_hub.py`, `test_build_caching.py`, `test_ui_screenshots.py`)
+  require every `ref: vX.Y.Z` checkout inside the workflows and examples to be
+  **>= PACK_VERSION**, because a caller that checks out a tag is asking for the
+  scripts that tag contains. So the order is: land content on `main` → the
+  human decides the next version → bump `PACK_VERSION`, the workflow pins, the
+  example pins and the tag together. Editing the template does not bump a
+  version; releasing does.
 - `flutter-builder-manual-ci.patch` is a review diff of the "make CI manual"
   change and nothing in the repository reads it. It is generated with
   `diff -ruN a/ b/`; regenerate rather than hand-edit, and keep it out of the
