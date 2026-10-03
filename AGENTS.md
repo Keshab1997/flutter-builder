@@ -12,7 +12,7 @@ This file is not it.
 ## The contract in one line
 
 This repo ships reusable GitHub Actions workflows and an agent pack. Projects
-consume them **by tag** (`@v1.13.0`), so **`main` is staging**: push to it
+consume them **by tag** (`@v1.13.1`), so **`main` is staging**: push to it
 freely, tag it deliberately.
 
 ```bash
@@ -109,7 +109,7 @@ python3 scripts/sync-agent-pack.py --check    # exit 1 when out of sync (CI-safe
 
 | | |
 |---|---|
-| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.13.0` and `install.sh --ref v1.13.0` |
+| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.13.1` and `install.sh --ref v1.13.1` |
 | `main` | staging — your landing zone, safe to push |
 | A tag | the release — **every project's CI changes at once** |
 
@@ -188,7 +188,7 @@ Claude ইত্যাদি সবই এটা খোঁজে)।
   **৫ সেকেন্ডে** চলে (`python3 -m pytest tests/ -q`), কোনো Flutter SDK ছাড়াই।
 - **CI ম্যানুয়াল** — push করলে কিছুই চলে না, তাই push করে অপেক্ষা করার মানে
   শুধু সময় নষ্ট। তাই এখানে সরাসরি `main`-এ push করাটাই নিয়ম।
-- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.13.0` pin করে),
+- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.13.1` pin করে),
   কিন্তু নতুন tag দিলে সবার CI একসাথে বদলে যায় — তাই tag আপনার সিদ্ধান্ত।
 - **আপনার app project-গুলো** (quizbaaz ইত্যাদি) যে `AGENTS.md` পায় সেটা এই
   ফাইল না — সেটা `agent-pack/AGENTS.template.md` থেকে

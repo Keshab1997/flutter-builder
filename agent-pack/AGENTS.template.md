@@ -3,7 +3,7 @@
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep the work moving without burning CI.
 
-<!-- flutter-builder:agent-pack:start v1.13.0 -->
+<!-- flutter-builder:agent-pack:start v1.13.1 -->
 ## Rule #1 — CI is manual; preflight is your check
 
 This repository runs CI **only when the human dispatches it** (Actions → *Flutter
