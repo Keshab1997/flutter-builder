@@ -165,6 +165,27 @@ jobs:
         working-directory: ${{ env.SMOKE_WEB_DIR }}
         run: flutter build web --release
 
+      - name: The pinned builder really ships the capture scripts
+        # ui-screenshots.yml fetches the capture scripts by checking out
+        # flutter-builder at the `ref:` written inside itself. A ref older than
+        # the release that shipped the scripts clones fine and then dies at
+        # capture time with exit 127 ("No such file or directory") - which is
+        # exactly what v1.10.0 did, in nine repositories at once. Cloning the
+        # pin here turns that into a legible failure in this repository.
+        run: |
+          set -euo pipefail
+          pin="$(sed -n 's/^ *ref: \(v[0-9][0-9.]*\)$/\1/p' .github/workflows/ui-screenshots.yml | head -n1)"
+          echo "ui-screenshots.yml checks out flutter-builder@$pin"
+          test -n "$pin"
+          git clone -q --depth 1 --branch "$pin" \
+            https://github.com/Keshab1997/flutter-builder.git "$RUNNER_TEMP/builder-at-pin"
+          for f in capture-screenshots.sh capture-pages.cjs embed-screenshots.sh; do
+            test -f "$RUNNER_TEMP/builder-at-pin/scripts/$f" || {
+              echo "::error::$pin does not contain scripts/$f - the pin is older than the release that shipped the screenshot pipeline"
+              exit 1
+            }
+          done
+
       - name: Capture screenshots with the shipped script
         run: |
           bash scripts/capture-screenshots.sh \

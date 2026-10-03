@@ -163,9 +163,9 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Not the pack version: this workflow *and* the scripts it calls were
-          # introduced together in v1.10.0, so an older tag would not contain
+          # introduced together in v1.11.2, so an older tag would not contain
           # them. Bump this only with a release that ships both.
-          ref: v1.10.0
+          ref: v1.11.2
           path: .flutter-builder
 
       - name: Capture screenshots

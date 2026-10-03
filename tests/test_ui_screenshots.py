@@ -97,6 +97,53 @@ class WorkflowShapeTests(unittest.TestCase):
         self.assertIn("if: always()", match.group("body"))
 
 
+class SelfCheckoutPinTests(unittest.TestCase):
+    """The ref the workflow checks out must be old enough to have the scripts.
+
+    `ui-screenshots.yml` fetches the capture scripts by checking out
+    flutter-builder at the `ref:` written inside itself. The first shipped
+    version of this workflow pinned v1.10.0 - a tag from before the scripts
+    existed - so all nine repositories that installed the caller failed at
+    capture time with `exit 127` and a "No such file or directory" message.
+    The scripts landed in v1.11.0; the pin must never walk back in time, and it
+    must move together with the example caller.
+    """
+
+    # The release that first shipped scripts/capture-screenshots.sh.
+    FIRST_TAG_WITH_SCRIPTS = (1, 11, 0)
+
+    def pin(self, text: str) -> str:
+        match = re.search(r"(?m)^\s+ref: (v[0-9][0-9.]*)$", text)
+        self.assertIsNotNone(match, "no builder ref in the reusable workflow")
+        return match.group(1)
+
+    def test_the_pin_ships_the_capture_scripts(self) -> None:
+        pinned = version_tuple(self.pin(REUSABLE.read_text(encoding="utf-8")))
+        self.assertGreaterEqual(pinned, self.FIRST_TAG_WITH_SCRIPTS,
+                                "the workflow would check out a tag without the scripts")
+
+    def test_the_pin_matches_the_ref_callers_are_told_to_use(self) -> None:
+        workflow = REUSABLE.read_text(encoding="utf-8")
+        example = EXAMPLE.read_text(encoding="utf-8")
+        uses = re.search(r"ui-screenshots\.yml@(v[0-9][0-9.]*)", example)
+        self.assertIsNotNone(uses, "the example caller lost its pin")
+        self.assertEqual(self.pin(workflow), uses.group(1),
+                         "the example caller and the workflow's own checkout "
+                         "have drifted apart - they move together")
+
+    def test_the_smoke_test_proves_the_pin_has_the_scripts(self) -> None:
+        """The unit test above only reads text; this keeps the workflow that
+        actually clones the pin (and would catch a tag being deleted) alive."""
+        smoke = SMOKE.read_text(encoding="utf-8")
+        match = re.search(r"(?ms)^      - name: The pinned builder really ships the "
+                          r"capture scripts\n(?P<body>(?:        .*\n|\n)+)", smoke)
+        self.assertIsNotNone(match, "the runtime guard against a stale pin is gone")
+        body = match.group("body")
+        self.assertIn("git clone", body)
+        for script in ("capture-screenshots.sh", "capture-pages.cjs", "embed-screenshots.sh"):
+            self.assertIn(script, body)
+
+
 class CallerExampleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = EXAMPLE.read_text(encoding="utf-8")
