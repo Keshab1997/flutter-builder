@@ -15,11 +15,14 @@ CI* → Run workflow). Nothing runs on a push. So:
 - `tool/preflight.py` is your only automatic check. Run it before every push —
   it is seconds, not minutes, and catches the mistakes that would otherwise
   surface in the next manual CI run.
-- **Dart edits get a real check, not a guess.** `preflight.py` cannot see a
-  type error or a failing widget test, so install the SDK once per session
-  (~40 s, no credentials) and run `flutter analyze` — plus `flutter test` before
-  asking for CI. Everything else (Markdown, YAML, scripts, docs) still ships on
-  preflight alone. See *Checking Dart for real* below.
+- **Dart edits are checked on purpose, not by reflex.** Most changes have a
+  matching test file: run the one that covers your edit
+  (`flutter test test/<name>_test.dart`), not the whole suite. `flutter analyze`
+  and the full `flutter test` are for diffs that touch a shared surface, for
+  work that feels risky, or for when the human asks — repeating the full pair
+  after every small edit is the fastest way to make the loop feel like a chore.
+  Everything else (Markdown, YAML, scripts, docs) still ships on preflight
+  alone. See *Checking Dart for real* below.
 - **When CI does run, it is the source of truth** — read its result before
   calling a batch done. But it runs when the human says so, not on your push.
 
@@ -33,8 +36,8 @@ python3 tool/agent_loop.py -m "fix(scope): what changed"   # preflight + commit 
 | Check | Cost | When it is the right check |
 |---|---|---|
 | `python3 tool/preflight.py` | ~1 s | every change, before every push |
-| `flutter analyze` (via flutter-bootstrap) | 40 s once per session, then ~20 s | any Dart change |
-| `flutter test` | 1–3 min | any behaviour change, before asking for CI |
+| `flutter test test/<file>_test.dart` (via flutter-bootstrap) | 40 s once per session, then seconds | the Dart change that file covers |
+| `flutter analyze` or the full `flutter test` | ~20 s / 1–3 min | shared surfaces, risky diffs, or when the human asks |
 | `python3 tool/see_screen.py` | one CI run | before and after a UI change |
 | The human's CI run | the human's attention + a runner | once per finished batch — never per edit |
 
@@ -53,9 +56,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-bootstrap
 cd <app-dir> && flutter pub get && flutter analyze && flutter test
 ```
 
-- `flutter analyze` is the minimum for any Dart change — it catches exactly what
-  preflight cannot, in ~20 seconds.
-- `flutter test` before asking the human to run CI, whenever behaviour changed.
+- When you run a Dart check at all, `flutter analyze` is the floor: it catches
+  exactly what preflight cannot, in ~20 seconds. Worth it for a diff that
+  reaches a shared surface, or one you cannot clear by reading it.
+- A behaviour change with a matching test gets that **one file** run
+  (`flutter test test/<name>_test.dart`). The full suite belongs to the human's
+  CI run, unless the human asks for it locally.
 - CI pins its own Flutter version: a local pass is *indicative*, not final. When
   the two disagree, CI wins — do not "fix" code to satisfy the local version
   without saying so in the commit message.
@@ -148,9 +154,9 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
    table below. Waiting is pure loss.
 2. **Running a full build to check a Dart edit.** `flutter build apk|aab|web`
    takes minutes and proves nothing `analyze` + `test` did not already prove.
-3. **Asking the human for a CI run before preflight, `analyze` and `test` are
-   green.** A red run spends their attention and a runner, and tells you what a
-   twenty-second local check would have.
+3. **Asking the human for a CI run before preflight is green and the tests you
+   chose to run pass.** A red run spends their attention and a runner, and tells
+   you what a local check would have.
 4. **Guessing at a red build.** Read the failing step's log first (below). A
    guess that misses doubles the rounds, which is the whole cost this file
    exists to avoid.
@@ -231,10 +237,10 @@ rejects a request that still carries the `Authorization` header
 
 ## মানুষের জন্য — এই ফাইলটা কী
 
-- **দুই স্তরের যাচাই:** ছোট পরিবর্তনে agent নিজেই `preflight.py` চালায়
-  (~১ সেকেন্ড); Dart কোড বদলালে `flutter-bootstrap` দিয়ে Flutter SDK বসিয়ে
-  `flutter analyze` আর দরকারে `flutter test` চালায় — অর্থাৎ ভাঙা কোড আপনার
-  CI পর্যন্ত পৌঁছায় না।
+- **যে যাচাইটা আসলে দরকার, শুধু সেটাই:** ছোট পরিবর্তনে শুধু `preflight.py`
+  (~১ সেকেন্ড); Dart বদলালে সংশ্লিষ্ট একটা test ফাইল
+  (`flutter test test/<name>_test.dart`) — পুরো `analyze` + `test` শুধু shared
+  কিছু বদলালে বা আপনি বললে। প্রতিটা ছোট edit-এর পিছনে পুরো suite চালানো লাগে না।
 - **সরাসরি `main`-এ push** — branch নেই, PR নেই। push করলে CI নিজে থেকে চলে না।
 - **CI চালানোর বোতাম আপনারই** — একটা batch শেষ হলে একবার চালালেই যথেষ্ট।
 - **UI বদলালে ছবি দেখে যাচাই** — `python3 tool/see_screen.py`।
