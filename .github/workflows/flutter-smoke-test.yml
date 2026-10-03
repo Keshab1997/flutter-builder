@@ -18,18 +18,32 @@ on:
   push:
     branches: [main]
     paths:
+      # Everything the smoke test exercises, not just the workflow files: the
+      # screenshots job runs the shipped scripts, so a fix inside
+      # capture-pages.cjs (the headless-browser flags, for instance) must
+      # re-run this workflow instead of silently skipping it.
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
       - .github/workflows/publish-release.yml
+      - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
+      - scripts/capture-screenshots.sh
+      - scripts/capture-pages.cjs
+      - scripts/embed-screenshots.sh
+      - tests/test_ui_screenshots.py
   pull_request:
     paths:
       - .github/workflows/flutter-build.yml
       - .github/workflows/flutter-smoke-test.yml
       - .github/workflows/preview-cleanup.yml
       - .github/workflows/publish-release.yml
+      - .github/workflows/ui-screenshots.yml
       - .github/workflows/web-preview.yml
+      - scripts/capture-screenshots.sh
+      - scripts/capture-pages.cjs
+      - scripts/embed-screenshots.sh
+      - tests/test_ui_screenshots.py
   schedule:
     # Weekly, even when nothing changes here: catches upstream Flutter /
     # Gradle / runner-image breakage before callers hit it.
@@ -119,3 +133,84 @@ jobs:
         working-directory: ${{ env.SMOKE_APP_DIR }}
         run: |
           ls -lh build/app/outputs/flutter-apk/*.apk
+
+  # Validates the screenshot pipeline end to end: a real Flutter web build, a
+  # real static server, a real headless browser, and a PNG that must actually
+  # be 390x844. Without this job the capture script would only be exercised the
+  # first time a user's pull request calls ui-screenshots.yml.
+  screenshots:
+    name: Screenshot pipeline (web build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SMOKE_WEB_DIR: smoke-web
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel || 'stable' }}
+          cache: true
+
+      - name: Generate a fresh Flutter app with web support
+        run: |
+          flutter create \
+            --platforms=web \
+            --org dev.flutterbuilder.smoke \
+            --project-name flutter_builder_web_smoke_app \
+            "$SMOKE_WEB_DIR"
+
+      - name: Build web
+        working-directory: ${{ env.SMOKE_WEB_DIR }}
+        run: flutter build web --release
+
+      - name: Capture screenshots with the shipped script
+        run: |
+          bash scripts/capture-screenshots.sh \
+            --build-dir "$SMOKE_WEB_DIR/build/web" \
+            --out /tmp/ui-smoke \
+            --routes / \
+            --viewports 390x844 \
+            --wait-ms 15000 \
+            --max-wait-ms 60000 \
+            --min-kb 5
+
+      - name: Verify the screenshots really rendered
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import struct
+
+          out = pathlib.Path("/tmp/ui-smoke")
+          pngs = sorted(out.glob("*.png"))
+          assert pngs, "no PNG was captured"
+
+          # The manifest carries the decoded pixel statistics, because a solid
+          # white 390x844 screenshot is 2.8 KB and a plain-but-correct page is
+          # 4.4 KB - file size cannot tell "rendered" from "never painted".
+          rows = [line.split("\t") for line in
+                  (out / "manifest.tsv").read_text().splitlines() if line.strip()]
+          assert rows, "the manifest is empty"
+          for name, route, viewport, size, colors, share in rows:
+              path = out / f"{name}.png"
+              assert path.is_file(), f"{name}.png is missing"
+              data = path.read_bytes()
+              assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path} is not a PNG"
+              # PNG IHDR: width and height are big-endian uint32 at 16 and 20.
+              width, height = struct.unpack(">II", data[16:24])
+              assert (width, height) == (390, 844), f"{path} is {width}x{height}"
+              assert int(colors) > 2, (
+                  f"{name} is a flat {colors}-colour screen: the app never painted. "
+                  f"See the capture step above for console errors and WebGL state.")
+              print(f"{name}.png: {width}x{height}, {int(size) // 1024} KB, "
+                    f"{colors} colours (top colour {share})")
+          PY
+
+      - name: Upload what the pipeline produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-ui-screenshots
+          path: /tmp/ui-smoke/*.png
+          if-no-files-found: warn

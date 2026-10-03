@@ -1,0 +1,196 @@
+name: Reusable Flutter UI screenshots (web build)
+
+# Answers "what does this screen look like now?" inside the pull request.
+#
+# Why a web build and not an emulator: an Android emulator costs 10-15 minutes
+# per run and can only reach a second screen with integration tests the project
+# may not have; a web build starts in about a minute, needs no device, and is
+# enough to see layout, colours, spacing and text. Apps using platform-only
+# plugins (camera, bluetooth, local notifications) will not render on web - the
+# capture step says so instead of pretending the screen is empty.
+#
+# The screenshots land in three places:
+#   * the workflow artifact (downloadable, 14 days by default);
+#   * a comment on the pull request, images embedded from a `ui-screenshots`
+#     branch (that is the only free URL GitHub renders in markdown);
+#   * the step summary.
+#
+# Callers need `contents: write` (to push the images) and
+# `pull-requests: write` (to comment); without them the capture still works and
+# only the comment is skipped.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Flutter project directory inside the caller repository
+        required: false
+        type: string
+        default: "."
+      flutter-channel:
+        description: Flutter channel (stable, beta, or master)
+        required: false
+        type: string
+        default: stable
+      dart-defines:
+        description: >-
+          Compile-time Dart defines for the web build, one KEY=VALUE per line.
+          Use the same values the app needs to start (API base URL, feature
+          flags); the values end up in the bundle, so never a secret.
+        required: false
+        type: string
+        default: ""
+      codegen:
+        description: Code generation to run before the build (none, build_runner, gen-l10n, both)
+        required: false
+        type: string
+        default: none
+      routes:
+        description: >-
+          Comma separated app routes to capture (default `/`). The default
+          Flutter web URL strategy is hash based, so `/settings` is captured at
+          `#/settings`. Deeper screens without routes need integration tests.
+        required: false
+        type: string
+        default: "/"
+      viewports:
+        description: >-
+          Comma separated WxH viewports. The default `390x844` is a phone.
+        required: false
+        type: string
+        default: "390x844"
+      wait-ms:
+        description: Milliseconds to let the app settle before each screenshot
+        required: false
+        type: number
+        default: 8000
+      embed-in-pr:
+        description: >-
+          Push the images to the screenshots branch and comment them on the
+          pull request. Off means artifact only.
+        required: false
+        type: boolean
+        default: true
+      screenshots-branch:
+        description: Branch that holds the images for the pull request comment
+        required: false
+        type: string
+        default: ui-screenshots
+      artifact-retention-days:
+        description: Number of days to keep the screenshot artifact
+        required: false
+        type: number
+        default: 14
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  screenshots:
+    name: Build web and capture screenshots
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout caller project
+        uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run code generation
+        if: inputs.codegen != 'none' && inputs.codegen != ''
+        run: |
+          set -euo pipefail
+          case "${{ inputs.codegen }}" in
+            build_runner|both) dart run build_runner build --delete-conflicting-outputs ;;
+          esac
+          case "${{ inputs.codegen }}" in
+            gen-l10n|both) flutter gen-l10n ;;
+          esac
+
+      - name: Build web
+        env:
+          DART_DEFINES: ${{ inputs.dart-defines }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r line; do
+            [ -n "${line// /}" ] || continue
+            args+=("--dart-define=$line")
+          done <<< "$DART_DEFINES"
+          flutter build web --release --no-pub ${args[@]+"${args[@]}"}
+
+      - name: Check out this builder (for the capture scripts)
+        uses: actions/checkout@v5
+        with:
+          repository: Keshab1997/flutter-builder
+          # Not the pack version: this workflow *and* the scripts it calls were
+          # introduced together in v1.10.0, so an older tag would not contain
+          # them. Bump this only with a release that ships both.
+          ref: v1.10.0
+          path: .flutter-builder
+
+      - name: Capture screenshots
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/capture-screenshots.sh" \
+            --build-dir build/web \
+            --out ui-screenshots \
+            --routes "${{ inputs.routes }}" \
+            --viewports "${{ inputs.viewports }}" \
+            --wait-ms "${{ inputs.wait-ms }}"
+
+      - name: Add the screenshot table to the summary
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f ui-screenshots/manifest.tsv ] || exit 0
+          {
+            echo "## UI screenshots"
+            echo
+            echo "| file | route | viewport | size |"
+            echo "|---|---|---|---|"
+            while IFS=$'\t' read -r name route viewport size; do
+              [ -n "$name" ] || continue
+              echo "| \`$name.png\` | \`$route\` | $viewport | $((size / 1024)) KB |"
+            done < ui-screenshots/manifest.tsv
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ github.event.pull_request.number || github.run_number }}
+          path: ${{ inputs.working-directory }}/ui-screenshots/*.png
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+      # Best-effort: a comment must never turn a green run red. Skipped for
+      # forks, whose token cannot write to this repository anyway.
+      - name: Publish the screenshots and comment on the pull request
+        if: >-
+          inputs.embed-in-pr && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          SCREENSHOTS_BRANCH: ${{ inputs.screenshots-branch }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/embed-screenshots.sh" \
+            --src ui-screenshots \
+            --branch "${{ inputs.screenshots-branch }}" \
+            --comment-out "$RUNNER_TEMP/ui-screenshots-comment.md"
