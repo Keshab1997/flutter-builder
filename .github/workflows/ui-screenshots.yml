@@ -179,20 +179,14 @@ jobs:
             --wait-ms "${{ inputs.wait-ms }}"
 
       - name: Add the screenshot table to the summary
+        # The table is built by a script, not by inline YAML: the first version
+        # of this step read four columns from a manifest that had grown to six
+        # and died on `$((size / 1024))` with error token "1491\t0.867".
         if: always()
         run: |
           set -euo pipefail
-          [ -f ui-screenshots/manifest.tsv ] || exit 0
-          {
-            echo "## UI screenshots"
-            echo
-            echo "| file | route | viewport | size |"
-            echo "|---|---|---|---|"
-            while IFS=$'\t' read -r name route viewport size; do
-              [ -n "$name" ] || continue
-              echo "| \`$name.png\` | \`$route\` | $viewport | $((size / 1024)) KB |"
-            done < ui-screenshots/manifest.tsv
-          } >> "$GITHUB_STEP_SUMMARY"
+          bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/manifest-summary.sh" \
+            ui-screenshots/manifest.tsv >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the screenshot artifact
         if: always()

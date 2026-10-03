@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -95,6 +96,70 @@ class WorkflowShapeTests(unittest.TestCase):
                           r"(?P<body>(?:        .*\n|\n)+)", self.text)
         self.assertIsNotNone(match)
         self.assertIn("if: always()", match.group("body"))
+
+
+class ManifestSummaryTests(unittest.TestCase):
+    """The table at the end of a run must survive the manifest changing shape.
+
+    The manifest grew from four columns to six when blank-screen detection
+    moved to real pixels. The summary step kept reading four, so `size` quietly
+    became the rest of the line and `$((size / 1024))` died with the error
+    token "1491\t0.867" - in nine repositories, in the step whose only job is
+    to print a table. Parsing now lives in one script, and this runs it.
+    """
+
+    SCRIPT = ROOT / "scripts" / "manifest-summary.sh"
+
+    def run_script(self, content: str, *extra: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.tsv"
+            manifest.write_text(content, encoding="utf-8")
+            done = subprocess.run(["bash", str(self.SCRIPT), str(manifest), *extra],
+                                  capture_output=True, text=True, check=True)
+        return done.stdout
+
+    def test_the_present_six_column_manifest(self) -> None:
+        out = self.run_script("home-390x844\t/\t390x844\t67739\t1491\t0.867\n")
+        self.assertIn("| `home-390x844.png` | `/` | 390x844 | 66 KB | 1491 |", out)
+
+    def test_an_older_four_column_manifest_still_prints(self) -> None:
+        out = self.run_script("home-390x844\t/\t390x844\t67739\n")
+        self.assertIn("| `home-390x844.png` | `/` | 390x844 | 66 KB |", out)
+
+    def test_a_manifest_without_pixel_stats_prints_a_dash(self) -> None:
+        out = self.run_script("a\t/\t390x844\t1024\t-1\t-1\n")
+        self.assertIn("| `a.png` | `/` | 390x844 | 1 KB |", out)
+
+    def test_a_missing_manifest_is_not_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(["bash", str(self.SCRIPT), f"{tmp}/gone.tsv"],
+                                  capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "")
+
+    def test_the_script_reads_every_column_the_capture_writes(self) -> None:
+        writer = (ROOT / "scripts" / "capture-pages.cjs").read_text(encoding="utf-8")
+        append = re.search(r"fs\.appendFileSync\(manifest,\s*(?P<row>.*?)\);", writer, re.S)
+        self.assertIsNotNone(append, "the manifest writer moved")
+        # Columns are the tab-separated fields (count the separators, not the
+        # interpolations: width and height are two of them inside one field).
+        written = len(re.findall(r"\\t", append.group("row"))) + 1
+        script = self.SCRIPT.read_text(encoding="utf-8")
+        read = re.search(r"while IFS=\$'\\t' read -r (?P<vars>.+?); do", script)
+        self.assertIsNotNone(read, "the manifest reader moved")
+        self.assertGreaterEqual(len(read.group("vars").split()), written,
+                                "the summary script reads fewer columns than are written")
+
+    def test_no_workflow_parses_the_manifest_inline(self) -> None:
+        """Inline parsing is how the two drifted apart the first time."""
+        for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"while IFS=\$'\\t' read -r",
+                                f"{path.name} parses the manifest inline; "
+                                f"call scripts/manifest-summary.sh instead")
+        self.assertIn("manifest-summary.sh",
+                      REUSABLE.read_text(encoding="utf-8"))
+        self.assertIn("manifest-summary.sh", SMOKE.read_text(encoding="utf-8"))
 
 
 class SelfCheckoutPinTests(unittest.TestCase):

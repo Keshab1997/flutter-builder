@@ -228,6 +228,11 @@ jobs:
                     f"{colors} colours (top colour {share})")
           PY
 
+      - name: Build the summary table from the manifest
+        # Same script the reusable workflow uses, run here so a manifest change
+        # cannot silently break the step that only formats it.
+        run: bash scripts/manifest-summary.sh /tmp/ui-smoke/manifest.tsv "Smoke run"
+
       - name: Upload what the pipeline produced
         if: always()
         uses: actions/upload-artifact@v4
