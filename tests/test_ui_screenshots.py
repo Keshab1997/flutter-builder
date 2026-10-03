@@ -91,6 +91,18 @@ class WorkflowShapeTests(unittest.TestCase):
             self.text)
         self.assertIn("continue-on-error: true", self.text)
 
+    def test_the_manifest_travels_with_the_images(self) -> None:
+        """Blank-screen detection lives in the manifest's pixel count.
+
+        The artifact used to carry only `*.png`, so a tool that downloads it
+        (tool/see_screen.py) could not tell a real screen from a white one - and
+        neither could a human reading the artifact after GitHub expired the run.
+        """
+        match = re.search(r"(?m)^      - name: Upload the screenshot artifact\n"
+                          r"(?P<body>(?:        .*\n|\n)+)", self.text)
+        self.assertIsNotNone(match)
+        self.assertIn("manifest.tsv", match.group("body"))
+
     def test_artifact_is_uploaded_even_when_capture_fails(self) -> None:
         match = re.search(r"(?m)^      - name: Upload the screenshot artifact\n"
                           r"(?P<body>(?:        .*\n|\n)+)", self.text)

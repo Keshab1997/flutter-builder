@@ -163,9 +163,9 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Not the pack version: this workflow *and* the scripts it calls were
-          # introduced together in v1.12.0, so an older tag would not contain
+          # introduced together in v1.12.1, so an older tag would not contain
           # them. Bump this only with a release that ships both.
-          ref: v1.12.0
+          ref: v1.12.1
           path: .flutter-builder
 
       - name: Capture screenshots
@@ -193,7 +193,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ui-screenshots-${{ github.event.pull_request.number || github.run_number }}
-          path: ${{ inputs.working-directory }}/ui-screenshots/*.png
+          # The manifest travels with the images: it carries the pixel count
+          # that tells a real render from a blank one, and see_screen.py
+          # (agent pack) reads it to warn instead of showing a white page.
+          path: |
+            ${{ inputs.working-directory }}/ui-screenshots/*.png
+            ${{ inputs.working-directory }}/ui-screenshots/manifest.tsv
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}
 

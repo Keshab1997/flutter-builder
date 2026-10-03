@@ -43,7 +43,7 @@ concurrency:
 jobs:
   preview:
     if: github.event_name != 'delete'
-    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.12.0
+    uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.12.1
     with:
       # working-directory: apps/mobile   # if the app lives in a subfolder
       comment-on-pr: true
@@ -58,7 +58,7 @@ jobs:
   cleanup:
     # A deleted tag is ignored inside the reusable workflow.
     if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.12.0
+    uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.12.1
     # A delete event leaves the event payload unreadable inside a called
     # workflow, so the caller hands the deleted ref over itself.
     with:
