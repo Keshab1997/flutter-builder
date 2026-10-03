@@ -27,9 +27,9 @@ jobs:
     # A draft pull request is a scratchpad: screenshots start when it is marked
     # ready for review, so iterating costs nothing.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # v1.11.2 is the first release that ships this workflow (older tags do not
+    # v1.11.3 is the first release that ships this workflow (older tags do not
     # contain the file). Move this pin forward with scripts/bump-ref.sh.
-    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.11.2
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.11.3
     with:
       flutter-channel: stable
       # List the screens this app actually has. `/` is the home screen; for

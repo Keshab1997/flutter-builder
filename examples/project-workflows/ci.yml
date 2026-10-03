@@ -25,7 +25,7 @@ jobs:
     # A draft pull request is a scratchpad: CI starts when it is marked ready
     # for review, so iterating costs no runs at all.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.11.2
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.11.3
     with:
       flutter-channel: stable
       run-format-check: true
