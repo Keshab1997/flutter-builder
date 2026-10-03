@@ -1600,9 +1600,11 @@ CI* → Run workflow). Nothing runs on a push. So:
 - `tool/preflight.py` is your only automatic check. Run it before every push —
   it is seconds, not minutes, and catches the mistakes that would otherwise
   surface in the next manual CI run.
-- Do **not** run `flutter test`, `flutter analyze`, `flutter build`,
-  `dart analyze` or `gradlew` locally to "check quickly". The sandbox usually has
-  no Flutter SDK, and a local pass would not match CI anyway.
+- **Dart edits get a real check, not a guess.** `preflight.py` cannot see a
+  type error or a failing widget test, so install the SDK once per session
+  (~40 s, no credentials) and run `flutter analyze` — plus `flutter test` before
+  asking for CI. Everything else (Markdown, YAML, scripts, docs) still ships on
+  preflight alone. See *Checking Dart for real* below.
 - **When CI does run, it is the source of truth** — read its result before
   calling a batch done. But it runs when the human says so, not on your push.
 
@@ -1610,6 +1612,46 @@ CI* → Run workflow). Nothing runs on a push. So:
 python3 tool/preflight.py     # before every push: dead code / unused params / unused imports
 python3 tool/agent_loop.py -m "fix(scope): what changed"   # preflight + commit + push, one call
 ```
+
+### What a check costs
+
+| Check | Cost | When it is the right check |
+|---|---|---|
+| `python3 tool/preflight.py` | ~1 s | every change, before every push |
+| `flutter analyze` (via flutter-bootstrap) | 40 s once per session, then ~20 s | any Dart change |
+| `flutter test` | 1–3 min | any behaviour change, before asking for CI |
+| `python3 tool/see_screen.py` | one CI run | before and after a UI change |
+| The human's CI run | the human's attention + a runner | once per finished batch — never per edit |
+
+Pick the cheapest check that actually covers the change. Building the whole app
+to answer a question `flutter analyze` can answer is the most common way to turn
+a two-minute task into a twenty-minute one.
+
+### Checking Dart for real (flutter-bootstrap)
+
+The sandbox starts without a Flutter SDK, and one installed now is gone next
+session. `flutter-bootstrap` installs a working SDK in ~40 seconds, with no
+credentials and a sha256-verified download:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-bootstrap/main/setup.sh) --quiet --json
+cd <app-dir> && flutter pub get && flutter analyze && flutter test
+```
+
+- `flutter analyze` is the minimum for any Dart change — it catches exactly what
+  preflight cannot, in ~20 seconds.
+- `flutter test` before asking the human to run CI, whenever behaviour changed.
+- CI pins its own Flutter version: a local pass is *indicative*, not final. When
+  the two disagree, CI wins — do not "fix" code to satisfy the local version
+  without saying so in the commit message.
+- Do **not** `flutter build apk` / `flutter build aab` / `flutter build web`
+  locally "just to check". That is minutes per run for an artifact only the CI
+  workflow needs to produce, and the signing secrets live in CI anyway.
+- Re-running that one-liner later in the same session is safe and instant (~0.2 s
+  when the SDK is already there).
+- Need a GitHub token in this session (to dispatch a run, read logs, push)? The
+  companion repo `agent-bootstrap` pairs one with three browser clicks; pushing
+  with `git` over HTTPS may already work, in which case skip it.
 
 ## The batch loop — many small changes, one push, one CI run
 
@@ -1685,6 +1727,19 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
   artifacts: never commit them, and never use one as a test fixture.
 * No token? `gh auth login` once, or pass `--token-file`.
 
+## Four things that cost an hour here (do not do them)
+
+1. **Waiting for CI after a push.** Nothing was queued — see the manual-only
+   table below. Waiting is pure loss.
+2. **Running a full build to check a Dart edit.** `flutter build apk|aab|web`
+   takes minutes and proves nothing `analyze` + `test` did not already prove.
+3. **Asking the human for a CI run before preflight, `analyze` and `test` are
+   green.** A red run spends their attention and a runner, and tells you what a
+   twenty-second local check would have.
+4. **Guessing at a red build.** Read the failing step's log first (below). A
+   guess that misses doubles the rounds, which is the whole cost this file
+   exists to avoid.
+
 ## What a push costs here
 
 | Situation | What runs |
@@ -1692,6 +1747,7 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
 | Push to `main` (any change) | nothing — CI is manual |
 | Docs-only change (`**.md`, `docs/**`, `distribution/**`) | nothing |
 | You ask the human to run CI | CI once, for the whole batch |
+| `flutter analyze` / `flutter test` (via flutter-bootstrap) | nothing on GitHub — 40 s to install once per session, then seconds to minutes |
 | `see_screen.py` | the UI-screenshots workflow, once per call |
 
 If you want a run right now, do **not** retrigger it with an empty commit — use
@@ -1747,6 +1803,8 @@ rejects a request that still carries the `Authorization` header
 - **Respect existing structure:** edit existing files over adding new ones, and
   read the file you are about to change (comments explain *why* the code is the
   way it is — keep that voice).
+- **Match the check to the change** — the cost table near the top of this file
+  is the map. Cheap checks run every time; CI runs once, at the end.
 
 ## Ask the human before
 
@@ -1755,6 +1813,20 @@ rejects a request that still carries the `Authorization` header
 - force-pushing over history you do not own, or deleting branches, tags, or
   repository content;
 - anything that publishes publicly, spends money, or is irreversible.
+
+## মানুষের জন্য — এই ফাইলটা কী
+
+- **দুই স্তরের যাচাই:** ছোট পরিবর্তনে agent নিজেই `preflight.py` চালায়
+  (~১ সেকেন্ড); Dart কোড বদলালে `flutter-bootstrap` দিয়ে Flutter SDK বসিয়ে
+  `flutter analyze` আর দরকারে `flutter test` চালায় — অর্থাৎ ভাঙা কোড আপনার
+  CI পর্যন্ত পৌঁছায় না।
+- **সরাসরি `main`-এ push** — branch নেই, PR নেই। push করলে CI নিজে থেকে চলে না।
+- **CI চালানোর বোতাম আপনারই** — একটা batch শেষ হলে একবার চালালেই যথেষ্ট।
+- **UI বদলালে ছবি দেখে যাচাই** — `python3 tool/see_screen.py`।
+- **agent আগে অনুমতি নেবে** — tag/release, secrets, store metadata, বা যা
+  ফিরিয়ে আনা যায় না এমন কিছুর আগে।
+- এই ব্লকটা `install-agent-pack.sh` চালালে নিজে থেকেই update হয়; নিচের
+  আপনার নিজের notes কখনো মোছা হয় না।
 
 <!-- flutter-builder:agent-pack:end -->
 
