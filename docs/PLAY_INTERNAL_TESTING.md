@@ -43,7 +43,8 @@ Flutter app repository-তে [`examples/project-workflows/publish-release.yml`]
 
 আগে থেকে `publish-release.yml` থাকলে নতুন করে duplicate workflow যোগ করবেন না; নিচের dispatch inputs ও `with:` settings তাতে যোগ করুন। Sample workflow-তে Play upload opt-in হিসেবে আছে—Actions-এ `upload_to_play_internal` true করলে একই release run-এ Play upload হবে।
 
-Release notes-এর sample locale files-ও app repo-তে কপি করুন:
+Release notes-এর locale files **repository root-এ** থাকবে (`install.sh` চালালে
+এগুলো নিজে থেকেই তৈরি হয়, খালি থাকলে):
 
 ```text
 distribution/whatsnew/whatsnew-en-US
@@ -52,9 +53,21 @@ distribution/whatsnew/whatsnew-bn-BD
 
 প্রতিটি run-এর আগে এই ফাইলগুলোতে সেই release-এর আসল পরিবর্তন সংক্ষেপে লিখে commit/push করুন। Locale filename হবে `whatsnew-<BCP-47 locale>`—যেমন `whatsnew-en-US`। Notes directory workflow-তে `play-whats-new-directory` দিয়ে সেট করা আছে। Sample caller `@v1.13.1` pin করে — `play-whats-new-directory` input এই tag থেকেই আছে। পুরোনো tag (যেমন `@v1.8.6`)-এ এই input নেই, তাই caller ও wrapper সবসময় একই tag-এ pin করুন।
 
+> **App যদি subfolder-এ থাকে:** এই path `working-directory`-এর সাথে জোড়া
+> লাগে, তাই `'distribution/whatsnew'` লিখলে খোঁজা হয়
+> `<app-dir>/distribution/whatsnew`-তে। Root-এর ফাইলগুলো ধরতে দিন
+> `'../distribution/whatsnew'`। v1.14.0 থেকে **AAB Play-তে যাওয়ার আগেই** এই
+> directory যাচাই হয় — না পেলে run ওখানেই থেমে যায়, তাই ভুল path-এ
+> version code নষ্ট হয় না (Play-তে upload হয়ে গেলে সেটা ফেরানো যায় না)।
+
+**Package name আর টাইপ করতে হয় না (v1.14.0+):** `play-package-name` খালি রাখলে
+builder নিজেই `<working-directory>/android/app/build.gradle(.kts)` থেকে
+`applicationId` পড়ে নেয়। ভিন্ন কিছু লাগলে (flavour ইত্যাদি) input দিয়ে
+override করা যায়। নাম না মিললে build fail করে — চুপচাপ ভুল app-এ upload হয় না।
+
 ## ৫. একবারে GitHub Release + Play Internal testing
 
-Sample `publish-release.yml`-তে Play upload option আগে থেকেই আছে। Actions → **Publish Signed Android Release → Run workflow** খুলুন, `upload_to_play_internal` true করুন, এবং `package_name`-এ Gradle-এর `applicationId`/Play Console-এর exact package name দিন—যেমন `com.yourcompany.myapp`। Release notes files commit করা আছে কি না নিশ্চিত করে workflow চালান।
+Sample `publish-release.yml`-তে Play upload option আগে থেকেই আছে। Actions → **Publish Signed Android Release → Run workflow** খুলুন আর `upload_to_play_internal` true করুন। `package_name` **খালি রাখুন** — builder নিজেই `android/app/build.gradle` থেকে `applicationId` পড়ে নেবে (ভিন্ন কিছু দরকার হলে তবেই লিখুন)। Release notes files commit করা আছে কি না আর ভাবতে হবে না: না থাকলে run upload-এর *আগেই* থেমে যাবে।
 
 Workflow একবার signed AAB build করবে। একই AAB GitHub Release-এ যোগ হবে এবং Google Play-এর `internal` track-এ upload হবে—**AAB দ্বিতীয়বার build হবে না**। `upload_to_play_internal` false রাখলে GitHub Release-ই হবে, Play upload হবে না।
 
@@ -62,7 +75,7 @@ Workflow একবার signed AAB build করবে। একই AAB GitHub R
 
 ## পরের upload-এর আগে
 
-- `pubspec.yaml`-এর Android build number/version code প্রতিবার বাড়ান; Play একই version code আবার গ্রহণ করবে না। উদাহরণ: `version: 1.2.4+5`।
+- `pubspec.yaml`-এর Android build number/version code প্রতিবার বাড়ান; Play একই version code আবার গ্রহণ করবে না। উদাহরণ: `version: 1.2.4+5`। **একটা run upload হওয়ার পরে fail করলেও সেই version code খরচ হয়ে যায়** — Play-র bundle library-তে bundle-টা থেকে যায়, তাই পরেরবার number আরও বাড়াতে হয়।
 - Package name Play Console-এর app-এর সঙ্গে হুবহু মিলতে হবে।
 - Signed AAB-তে আগের upload key ব্যবহার করুন। Google Play App Signing সেটআপের সময় upload key এবং app signing key এক জিনিস নাও হতে পারে।
-- Build বা upload fail হলে Actions log-এর error দেখুন; secret value log/chat-এ paste করবেন না। Common কারণ: ভুল package name, missing secret, invalid JSON/key, Play API disabled, service account permission না থাকা, version code duplicate।
+- Build বা upload fail হলে Actions log-এর error দেখুন; secret value log/chat-এ paste করবেন না। Common কারণ: missing secret, invalid JSON/key, Play API disabled, service account permission না থাকা, version code duplicate, বা notes directory-র path ভুল।

@@ -135,6 +135,13 @@ fi
 [ ! -e "$repo_root/.github/workflows" ] || [ -d "$repo_root/.github/workflows" ] || fail ".github/workflows is not a directory."
 
 yaml_dir="$(yaml_quote "$app_dir")"
+# Play release notes belong to the repository, not to the app directory: the
+# generated caller points at the root copy, stepping out of a subdirectory app.
+if [ "$app_dir" = "." ]; then
+  notes_input='distribution/whatsnew'
+else
+  notes_input='../distribution/whatsnew'
+fi
 stage="$(mktemp -d)"
 trap 'rm -rf -- "$stage"' EXIT
 
@@ -224,6 +231,10 @@ name: Publish Signed Android Release
 
 # Manual only: builds a signed APK/AAB, creates a version tag and GitHub Release.
 # The reusable publish wrapper enforces version and placeholder safety checks.
+# Play upload is opt-in per run; the package name is read from the Gradle
+# applicationId unless package_name overrides it. Release notes for Play live in
+# distribution/whatsnew/ at the repository root (one whatsnew-<locale> file per
+# locale) — edit them before each release.
 on:
   workflow_dispatch:
     inputs:
@@ -237,6 +248,15 @@ on:
         required: false
         type: boolean
         default: false
+      upload_to_play_internal:
+        description: Also upload the signed AAB to Google Play Internal testing?
+        required: false
+        type: boolean
+        default: false
+      package_name:
+        description: Play package name override (leave blank to read android/app/build.gradle)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -255,6 +275,16 @@ YAML
   cat <<'YAML'
       release-draft: ${{ inputs.draft }}
       release-prerelease: ${{ inputs.prerelease }}
+YAML
+  # The notes directory is resolved against working-directory, so an app in a
+  # subdirectory reaches the repository-root notes with '../'.
+  cat <<YAML
+      play-track: \${{ inputs.upload_to_play_internal && 'internal' || '' }}
+      play-package-name: \${{ inputs.package_name }}
+      play-whats-new-directory: \${{ inputs.upload_to_play_internal && '$notes_input' || '' }}
+      play-status: completed
+YAML
+  cat <<'YAML'
     secrets: inherit
 YAML
 } > "$stage/publish-release.yml"
@@ -387,6 +417,30 @@ for file in "${changes[@]}"; do
   )
   say "Installed: .github/workflows/$file"
 done
+
+# Play release notes live at the repository root — callers pass
+# '../distribution/whatsnew' when the app sits in a subdirectory, because the
+# path is resolved against working-directory. Without the directory the Play
+# upload stops on its first release, so seed it here; a file that already
+# exists is never touched, since only a human knows what a release actually
+# changed.
+notes_dir="$repo_root/distribution/whatsnew"
+if [ ! -e "$notes_dir" ]; then
+  [ ! -L "$notes_dir" ] || fail "$notes_dir is a symlink; refusing to write through it."
+  mkdir -p -- "$notes_dir"
+fi
+for notes_file in whatsnew-en-US whatsnew-bn-BD; do
+  target="$notes_dir/$notes_file"
+  [ -e "$target" ] && continue
+  if [ "$notes_file" = "whatsnew-en-US" ]; then
+    notes_text='Internal testing build with the latest changes. Please try the app and share any issues or feedback with the team.'
+  else
+    notes_text='নতুন পরিবর্তনসহ অভ্যন্তরীণ পরীক্ষার বিল্ড। অ্যাপটি ব্যবহার করে কোনো সমস্যা বা মতামত থাকলে টিমকে জানান।'
+  fi
+  printf '%s\n' "$notes_text" > "$target"
+  say "Seeded: distribution/whatsnew/$notes_file (edit it before each Play release)"
+done
+
 say "Done. Review and commit .github/workflows/; no git push or release was triggered."
 if [ ! -d "$app_path/android" ]; then
   say "Note: android/ is missing; Android builds need an Android platform and signing configuration."

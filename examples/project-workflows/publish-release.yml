@@ -24,7 +24,7 @@ on:
         type: boolean
         default: false
       package_name:
-        description: Android applicationId / Play Console package name (required if Play upload is enabled)
+        description: Play package name override (leave blank to read applicationId from android/app/build.gradle)
         required: false
         type: string
 
@@ -36,10 +36,17 @@ jobs:
     uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.13.1
     with:
       app-name: My Flutter App
+      # working-directory: apps/mobile   # if the app lives in a subfolder
       release-draft: ${{ inputs.draft }}
       release-prerelease: ${{ inputs.prerelease }}
       play-track: ${{ inputs.upload_to_play_internal && 'internal' || '' }}
       play-package-name: ${{ inputs.package_name }}
+      # Release notes sit at the repository root, one whatsnew-<locale> file per
+      # locale. This path is resolved against working-directory, so an app in a
+      # subfolder has to step back out: '../distribution/whatsnew'. When the
+      # directory is missing the run stops *before* the AAB reaches Play —
+      # after that point the version code is spent and the build cannot be
+      # reused.
       play-whats-new-directory: ${{ inputs.upload_to_play_internal && 'distribution/whatsnew' || '' }}
       play-status: completed
     secrets: inherit

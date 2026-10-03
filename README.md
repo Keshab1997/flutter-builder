@@ -189,7 +189,7 @@ version: 1.2.3+4
 
 ### Play Store Internal testing (optional)
 
-দুটি আলাদা AAB build workflow লাগবে না: `publish-release.yml`-এ Play upload option চালু করলে একই signed AAB GitHub Release-এ যোগ হবে এবং Google Play Internal testing-এও যাবে। App repo-তে `PLAY_SERVICE_ACCOUNT_JSON` ও signing secrets দিন, তারপর caller workflow-তে Play option/package name সেট করুন। `distribution/whatsnew/`-এ locale notes থাকলে সেগুলোও Play-এ যাবে। পূর্ণ ধাপ: [`docs/PLAY_INTERNAL_TESTING.md`](docs/PLAY_INTERNAL_TESTING.md)। Secret কখনো public builder repository-তে দেবেন না.
+দুটি আলাদা AAB build workflow লাগবে না: `publish-release.yml`-এ Play upload option চালু করলে একই signed AAB GitHub Release-এ যোগ হবে এবং Google Play Internal testing-এও যাবে। App repo-তে `PLAY_SERVICE_ACCOUNT_JSON` ও signing secrets দিন, তারপর caller workflow-তে Play option চালু করুন (`upload_to_play_internal`)। Package name টাইপ করতে হয় না — builder নিজেই `android/app/build.gradle`-এর `applicationId` পড়ে নেয়। `distribution/whatsnew/`-এ locale notes থাকলে সেগুলোও Play-এ যাবে (installer ফাইলগুলো একবার seed করে দেয়); notes directory না থাকলে AAB Play-তে যাওয়ার **আগেই** run থেমে যায়, তাই version code নষ্ট হয় না। পূর্ণ ধাপ: [`docs/PLAY_INTERNAL_TESTING.md`](docs/PLAY_INTERNAL_TESTING.md)। Secret কখনো public builder repository-তে দেবেন না.
 
 ### Web preview (optional)
 

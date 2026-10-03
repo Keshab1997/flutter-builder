@@ -106,6 +106,43 @@ class InstallerTests(unittest.TestCase):
             self.assertIn('working-directory: "apps/mobile"', self.installed(name))
         self.assertFalse((self.repo / "apps/mobile/.github").exists())
 
+    def test_nested_app_points_play_notes_at_the_repository_root(self) -> None:
+        """A fresh install must be able to run a Play upload.
+
+        The notes directory is resolved against working-directory, so an app in
+        a subdirectory reaches the repository-root copy with '../'. Missing
+        notes used to surface only inside a release run, after the AAB had
+        already reached Play.
+        """
+        self.flutter_app("apps/mobile")
+        self.assert_success(self.run_installer("--app-dir", "apps/mobile"))
+        notes = self.repo / "distribution/whatsnew"
+        self.assertTrue((notes / "whatsnew-en-US").is_file())
+        self.assertTrue((notes / "whatsnew-bn-BD").is_file())
+        self.assertFalse((self.repo / "apps/mobile/distribution").exists())
+        caller = self.installed("publish-release.yml")
+        self.assertIn("play-track: ${{ inputs.upload_to_play_internal", caller)
+        self.assertIn("'../distribution/whatsnew'", caller)
+
+    def test_root_app_generated_caller_offers_the_play_upload(self) -> None:
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        caller = self.installed("publish-release.yml")
+        self.assertIn("upload_to_play_internal:", caller)
+        self.assertIn("'distribution/whatsnew'", caller)
+        self.assertIn("play-status: completed", caller)
+
+    def test_seeded_notes_are_never_overwritten(self) -> None:
+        """Only a human knows what a release changed, so a re-run leaves text."""
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        notes = self.repo / "distribution/whatsnew/whatsnew-en-US"
+        notes.write_text("Hand-written notes for 1.2.0\n", encoding="utf-8")
+        self.assert_success(self.run_installer())
+        self.assertEqual(
+            notes.read_text(encoding="utf-8"), "Hand-written notes for 1.2.0\n"
+        )
+
     def test_piped_bash_from_inside_flutter_app(self) -> None:
         app = self.flutter_app("flutter_app")
         self.flutter_app("apps/other")

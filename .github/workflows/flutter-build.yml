@@ -275,12 +275,12 @@ on:
         type: string
         default: ""
       play-package-name:
-        description: Android package name used for the Google Play upload
+        description: Android package name for the Play upload; empty reads applicationId from <working-directory>/android/app/build.gradle(.kts)
         required: false
         type: string
         default: ""
       play-whats-new-directory:
-        description: Optional directory under working-directory containing whatsnew-<LOCALE> release-note files
+        description: Optional whatsnew-<LOCALE> release-note directory, resolved against working-directory (use ../distribution/whatsnew when the notes sit at the repository root); a missing directory fails before the upload
         required: false
         type: string
         default: ""
@@ -1131,12 +1131,95 @@ jobs:
           groups: ${{ inputs.firebase-groups }}
           file: ${{ steps.distribution-file.outputs.file }}
 
+      # The two things the Play upload needs — a package name and the release
+      # notes — are resolved and checked *before* the AAB is handed over. Play
+      # keeps an uploaded bundle even when the rest of the step fails, so a
+      # broken path discovered afterwards costs a version code permanently: the
+      # next release has to bump `+build` and the failed one can never be
+      # reused. Both checks below therefore run first and fail cheap.
+      - name: Resolve the Play package name
+        if: inputs.play-track != '' && inputs.build-aab
+        id: play-package
+        env:
+          # A caller that knows better (a flavour, a renamed module) can still
+          # say so; an empty input means "read it from Gradle".
+          PLAY_PACKAGE_NAME_INPUT: ${{ inputs.play-package-name }}
+          APP_DIR: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${PLAY_PACKAGE_NAME_INPUT}" ]; then
+            echo "package_name=${PLAY_PACKAGE_NAME_INPUT}" >> "$GITHUB_OUTPUT"
+            echo "Using the play-package-name input: ${PLAY_PACKAGE_NAME_INPUT}"
+            exit 0
+          fi
+
+          gradle_file=""
+          for candidate in \
+            "${APP_DIR}/android/app/build.gradle.kts" \
+            "${APP_DIR}/android/app/build.gradle"; do
+            if [ -f "${candidate}" ]; then gradle_file="${candidate}"; break; fi
+          done
+
+          package_name=""
+          if [ -n "${gradle_file}" ]; then
+            # Matches both `applicationId = "x"` (Kotlin/Groovy) and the older
+            # Groovy `applicationId "x"`.
+            package_name="$(grep -oE 'applicationId[[:space:]]*=?[[:space:]]*"[^"]+"' "${gradle_file}" \
+              | head -1 | grep -oE '"[^"]+"' | tr -d '"' || true)"
+          fi
+
+          if [ -z "${package_name}" ]; then
+            echo "::error::Play upload is on but no package name was resolved: the play-package-name input is empty and no applicationId was found in ${APP_DIR}/android/app/build.gradle(.kts). Set the play-package-name input, or add the applicationId."
+            exit 1
+          fi
+
+          echo "package_name=${package_name}" >> "$GITHUB_OUTPUT"
+          echo "Read the package name from ${gradle_file}: ${package_name}"
+          if [ "${package_name}" = "com.example" ] || [ "${package_name#com.example.}" != "${package_name}" ]; then
+            echo "::warning::${package_name} still looks like a placeholder — Play will reject it."
+          fi
+
+      - name: Check the Play release-notes directory
+        if: inputs.play-track != '' && inputs.build-aab && inputs.play-whats-new-directory != ''
+        env:
+          # Exactly the path the upload step hands to the action, so this check
+          # cannot pass while the upload would fail.
+          NOTES_DIR: ${{ format('{0}/{1}', inputs.working-directory, inputs.play-whats-new-directory) }}
+          ROOT_RELATIVE_DIR: ${{ inputs.play-whats-new-directory }}
+          # Passed as an env var, never interpolated into the script text: an
+          # expression inside a `run:` block is evaluated as shell source.
+          WORKING_DIR: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+
+          if [ -d "${NOTES_DIR}" ]; then
+            count="$(find "${NOTES_DIR}" -maxdepth 1 -type f | wc -l)"
+            if [ "${count}" -eq 0 ]; then
+              echo "::warning::${NOTES_DIR} exists but has no whatsnew-<locale> files; Play will show the previous release's notes."
+            else
+              echo "Release notes found in ${NOTES_DIR}:"
+              ls -1 "${NOTES_DIR}"
+            fi
+            exit 0
+          fi
+
+          echo "::error::Play upload is on but the release-notes directory '${NOTES_DIR}' does not exist."
+          if [ -d "${ROOT_RELATIVE_DIR}" ]; then
+            echo "::error::It exists at the repository root ('${ROOT_RELATIVE_DIR}'), but play-whats-new-directory resolves against working-directory ('${WORKING_DIR}'). For an app in a subdirectory pass a root-relative path, e.g. play-whats-new-directory: '../${ROOT_RELATIVE_DIR}'."
+          else
+            echo "::error::Create it and commit one whatsnew-<locale> file per locale (e.g. whatsnew-en-US) together with the version bump."
+          fi
+          echo "Nothing was uploaded: this check runs before the AAB reaches Play, so no version code was spent."
+          exit 1
+
       - name: Upload AAB to Google Play
         if: inputs.play-track != '' && inputs.build-aab
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ inputs.play-package-name }}
+          # Resolved by the step above (input, else the Gradle applicationId).
+          packageName: ${{ steps.play-package.outputs.package_name }}
           releaseFiles: ${{ inputs.working-directory }}/build/app/outputs/bundle/release/app-release.aab
           track: ${{ inputs.play-track }}
           status: ${{ inputs.play-status }}
