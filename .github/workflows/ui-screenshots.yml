@@ -40,6 +40,15 @@ on:
         required: false
         type: string
         default: ""
+      generate-web-platform:
+        description: >-
+          Run `flutter create --platforms=web .` when the project has no `web/`
+          directory. For an app that has never been built for the web this
+          adds the folder (and nothing else) to the checkout before building;
+          the generated wrapper is not committed anywhere.
+        required: false
+        type: boolean
+        default: false
       codegen:
         description: Code generation to run before the build (none, build_runner, gen-l10n, both)
         required: false
@@ -107,6 +116,21 @@ jobs:
         with:
           channel: ${{ inputs.flutter-channel }}
           cache: true
+
+      - name: Generate the web platform
+        # `flutter create` reads the existing pubspec.yaml and only adds the
+        # missing web/ folder - one command instead of re-deriving the project
+        # name in bash. The job's checkout is thrown away, so nothing here can
+        # touch the caller's repository.
+        if: inputs.generate-web-platform
+        run: |
+          set -euo pipefail
+          if [ -d web ]; then
+            echo "web/ already exists - nothing to generate."
+            exit 0
+          fi
+          flutter create --platforms=web .
+          test -f web/index.html
 
       - name: Install dependencies
         run: flutter pub get

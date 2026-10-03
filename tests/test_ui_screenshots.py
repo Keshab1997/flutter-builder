@@ -53,6 +53,29 @@ class WorkflowShapeTests(unittest.TestCase):
             self.assertRegex(match.group(0), rf'(?m)^        default: "?{re.escape(default)}"?$',
                              f"{name} lost its previous-behaviour default")
 
+    def test_an_app_without_web_support_can_still_be_captured(self) -> None:
+        """`flutter build web` fails outright without a `web/` folder, and most
+        of the apps this pack is installed into have never been built for the
+        web. The opt-in step adds the folder to the job's throwaway checkout,
+        before `pub get`, and only when the input asks for it - so an app that
+        does ship `web/` keeps its own index.html/title.""" 
+        match = re.search(r"(?m)^      generate-web-platform:\n(?:        .*\n)+", self.text)
+        self.assertIsNotNone(match, "the generate-web-platform input is gone")
+        self.assertIn("default: false", match.group(0))
+        step = re.search(r"(?ms)^      - name: Generate the web platform\n(?P<body>(?:        .*\n|\n)+)", self.text)
+        self.assertIsNotNone(step, "the generate step is gone")
+        body = step.group("body")
+        self.assertIn("if: inputs.generate-web-platform", body)
+        self.assertIn("[ -d web ]", body)
+        self.assertIn("flutter create --platforms=web .", body)
+        # It must run before pub get (create touches pubspec resolution) and it
+        # must not commit anything back to the caller repository.
+        self.assertGreater(self.text.index("Generate the web platform"),
+                           self.text.index("Set up Flutter"))
+        self.assertLess(self.text.index("Generate the web platform"),
+                        self.text.index("Install dependencies"))
+        self.assertNotIn("git push", body)
+
     def test_calls_the_shipped_scripts(self) -> None:
         self.assertIn("scripts/capture-screenshots.sh", self.text)
         self.assertIn("scripts/embed-screenshots.sh", self.text)

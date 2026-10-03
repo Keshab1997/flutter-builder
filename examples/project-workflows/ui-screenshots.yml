@@ -39,6 +39,10 @@ jobs:
       # A phone and a small tablet. Older/smaller screens are where layout
       # breaks, so both are worth a look.
       viewports: "390x844,768x1024"
+      # Apps that have never been built for the web have no web/ folder and
+      # `flutter build web` would fail. Set this once and the workflow generates
+      # the folder inside its own checkout (`flutter create --platforms=web .`):
+      # generate-web-platform: true
       # Give Firebase/Supabase-configured apps the same values the build uses,
       # otherwise the screenshot is of a crash screen:
       # dart-defines: |
