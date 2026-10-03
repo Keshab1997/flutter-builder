@@ -280,8 +280,11 @@ class CallerExampleTests(unittest.TestCase):
         self.assertIn("contents: write", self.text)
         self.assertIn("pull-requests: write", self.text)
 
-    def test_skips_draft_pull_requests(self) -> None:
-        self.assertIn("github.event.pull_request.draft == false", self.text)
+    def test_is_manual_only(self) -> None:
+        """No push or pull_request trigger: the caller runs on demand only."""
+        self.assertIn("on:\n  workflow_dispatch:", self.text)
+        self.assertNotIn("  pull_request:", self.text)
+        self.assertNotIn("  push:", self.text)
 
     def test_pins_a_release_that_contains_the_workflow(self) -> None:
         match = re.search(r"ui-screenshots\.yml@(v[\d.]+)", self.text)
@@ -409,24 +412,15 @@ class OneCaptureScriptTests(unittest.TestCase):
 
 
 class SmokeWorkflowTriggerTests(unittest.TestCase):
-    """A fix that does not re-run the smoke test is a fix nobody verified.
+    """`flutter-smoke-test.yml` is manual now (plus a weekly cron).
 
-    `flutter-smoke-test.yml` is the only place the screenshot pipeline runs
-    end to end. The workflow used to list just the workflow files under
-    `paths:`, so a commit that only changed `scripts/capture-pages.cjs` - the
-    headless-browser flags, of all things - did not start the workflow at all.
-    The pull request stayed red for an older reason and the fix looked
-    untested. Every repository file the workflow reads must therefore appear
-    in both `paths:` lists.
+    With no push or pull_request trigger there is no path filter to keep in
+    step; what still matters is that the workflow actually exercises the shipped
+    screenshot scripts, so the screenshots job must reach capture-pages.cjs
+    through capture-screenshots.sh.
     """
 
     WORKFLOW_REFS = re.compile(r"(?:scripts|tests|agent-pack)/[A-Za-z0-9_.-]+")
-
-    def event_paths(self, text: str, event: str) -> list[str]:
-        block = re.search(
-            rf"(?ms)^  {event}:\n(.*?)(?=^  [a-z_]+:|^[a-z])", text)
-        self.assertIsNotNone(block, f"no {event}: block in the smoke workflow")
-        return re.findall(r"(?m)^      - (\S+)$", block.group(1))
 
     def screenshot_job(self, text: str) -> str:
         """The screenshots job only - the build job's install step is covered
@@ -471,16 +465,16 @@ class SmokeWorkflowTriggerTests(unittest.TestCase):
                 todo.append(f"scripts/{sibling}")
         return found
 
-    def test_every_referenced_repository_file_triggers_the_workflow(self) -> None:
+    def test_the_workflow_is_manual_only(self) -> None:
+        text = SMOKE.read_text(encoding="utf-8")
+        self.assertIn("  workflow_dispatch:", text)
+        self.assertNotIn("  push:", text)
+        self.assertNotIn("  pull_request:", text)
+
+    def test_the_screenshots_job_reaches_the_capture_script(self) -> None:
         text = SMOKE.read_text(encoding="utf-8")
         referenced = self.referenced_files(self.screenshot_job(text))
         self.assertIn("scripts/capture-pages.cjs", referenced)
-
-    def test_the_capture_flag_fix_is_covered(self) -> None:
-        """The concrete regression: the locale/WebGL fix lives in the .cjs."""
-        for event in ("push", "pull_request"):
-            listed = self.event_paths(SMOKE.read_text(encoding="utf-8"), event)
-            self.assertIn("scripts/capture-pages.cjs", listed, event)
 
 
 if __name__ == "__main__":

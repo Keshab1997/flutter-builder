@@ -145,20 +145,10 @@ trap 'rm -rf -- "$stage"' EXIT
   cat <<'YAML'
 name: Flutter CI — Format, Analyze & Test
 
-# Validates every pull request; on main it validates the merge result. The push
-# trigger is main-only on purpose: a feature branch with an open pull request
-# already runs through the pull_request event, and running both validated the
-# same commit twice under different concurrency groups.
+# Manual only: nothing runs on push or pull request. Batch your changes, then
+# run this once from Actions -> Flutter CI — Format, Analyze & Test -> Run
+# workflow. That keeps small edits from spending a CI run each.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-    # Prose and store metadata cannot change a Dart build: skip the run.
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "distribution/**"
   workflow_dispatch:
 
 permissions:
@@ -170,9 +160,6 @@ concurrency:
 
 jobs:
   ci:
-    # A draft pull request is a scratchpad: CI starts when it is marked ready
-    # for review, so iterating costs no runs at all.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
 YAML
   printf '    uses: %s/flutter-build.yml@%s\n' "$REUSABLE" "$ref"
   cat <<'YAML'
@@ -276,24 +263,16 @@ YAML
   cat <<'YAML'
 name: Deploy Flutter Web Preview (GitHub Pages)
 
-# Builds the app for the web on every push and pull request and publishes it
-# to GitHub Pages under preview/<branch>: test the app by opening a URL in a
-# browser instead of installing an APK. One-time setup: Settings -> Pages ->
-# Build and deployment -> Deploy from a branch -> gh-pages (root); the first
-# run creates the branch. Needs the web platform (flutter create --platforms
-# web .); plugins without web support will not work in the preview.
-#
-# The push trigger is main-only on purpose: a branch with an open pull request
-# already builds through the pull_request event, and running both fired two
-# deploys for one push against the shared gh-pages branch.
+# Builds the app for the web and publishes it to GitHub Pages under
+# preview/<branch>: test the app by opening a URL in a browser instead of
+# installing an APK. Manual only: run it from Actions -> Run workflow when you
+# want a fresh preview; nothing runs on a push or pull request. One-time setup:
+# Settings -> Pages -> Build and deployment -> Deploy from a branch -> gh-pages
+# (root); the first run creates the branch. Needs the web platform (flutter
+# create --platforms web .); plugins without web support will not work in the
+# preview.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "distribution/**"
-  pull_request:
+  workflow_dispatch:
   delete:
 
 permissions:

@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """agent_loop.py - one command for one full change loop.
 
-An agent working in this repository normally spends four or five tool calls
-per iteration: run preflight, commit, push, wait for CI, read the failure.
-Every one of those calls is a place where the loop can be abandoned halfway -
-a push without a preflight, a CI run nobody read, a commit made on `main`.
+An agent working in this repository normally spends several tool calls per
+iteration: run preflight, commit, push, wait for CI, read the failure. Every one
+of those calls is a place where the loop can be abandoned halfway.
 
-This script performs the whole loop in one call and stops at the first thing
-that would waste a CI run:
+This script performs the loop in one call:
 
-    preflight  ->  secret guard  ->  commit  ->  push  ->  ci_watch
+    preflight  ->  secret guard  ->  commit  ->  push
 
     python3 tool/agent_loop.py -m "fix(profile): guard null avatar"
     python3 tool/agent_loop.py -m "..." --amend          # fix the last commit
-    python3 tool/agent_loop.py -m "..." --draft-pr       # branch + draft PR
-    python3 tool/agent_loop.py -m "..." --no-watch       # push and stop
+    python3 tool/agent_loop.py -m "..." --no-push        # commit only
+
+Work happens on the current branch (normally `main`) and is pushed straight
+there - no feature branch, no pull request. CI is manual in this setup (see
+AGENTS.md): nothing runs on a push, so this loop does not wait for a run. Batch
+your edits and let the human dispatch CI once when the batch is ready; pass
+`--watch` only when a run is already in flight.
 
 What it refuses to do, on purpose:
 
-  * commit on the default branch (main/master) unless `--allow-main` is given:
-    nobody reviews a change that never left main, and CI there is not free;
   * commit a file that looks like a credential (`.env`, `*.jks`, `*.keystore`,
     `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
     unless `--allow-secret-paths` is given: the playbook says secrets never
@@ -27,8 +28,8 @@ What it refuses to do, on purpose:
   * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
     given: those findings are exactly what turns a push red.
 
-Exit codes: 0 = pushed (and green, when watched); 1 = CI failed or the push
-failed; 2 = refused or stopped before anything was changed.
+Exit codes: 0 = pushed (or committed with --no-push); 1 = the push failed;
+2 = refused or stopped before anything was changed.
 
 Standard library only, python3 >= 3.8. `git` must be on PATH.
 """
@@ -235,21 +236,22 @@ def watch(root: Path, sha: str, args) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="agent_loop.py",
-        description="preflight -> commit -> push -> watch CI, in one call.")
+        description="preflight -> commit -> push, in one call.")
     parser.add_argument("-m", "--message", help="commit message (conventional commits)")
     parser.add_argument("--amend", action="store_true",
                         help="amend the last commit (pushes with --force-with-lease)")
     parser.add_argument("--paths", nargs="*", default=None,
                         help="paths to stage (default: everything changed)")
-    parser.add_argument("--allow-main", action="store_true",
-                        help="permit a commit on the default branch")
     parser.add_argument("--allow-secret-paths", action="store_true",
                         help="stage files that look like credentials (review them first)")
     parser.add_argument("--no-preflight", action="store_true",
                         help="skip tool/preflight.py (CI will be the first check)")
     parser.add_argument("--no-push", action="store_true", help="commit only")
+    parser.add_argument("--watch", action="store_true",
+                        help="wait for this commit's CI run (CI is manual here, "
+                             "so only after a run is already in flight)")
     parser.add_argument("--no-watch", action="store_true",
-                        help="push and return (useful for draft pull requests)")
+                        help="accepted for compatibility; not watching is the default")
     parser.add_argument("--draft-pr", action="store_true",
                         help="open a draft pull request for this branch")
     parser.add_argument("--ready", action="store_true",
@@ -262,18 +264,12 @@ def main(argv: list[str]) -> int:
 
     if not args.message and not args.amend:
         parser.error("give -m/--message (or --amend to reuse the previous message)")
-    if args.no_preflight and not (args.no_watch or args.no_push):
-        print("agent_loop: --no-preflight with a watched push means CI is the "
-              "first check; that is exactly the slow path this tool avoids.")
+    if args.no_preflight and args.watch:
+        print("agent_loop: --no-preflight with --watch means CI is the first "
+              "check; that is exactly the slow path this tool avoids.")
 
     root = repo_root()
     branch = git_out("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
-    base = default_branch(root)
-    if branch == base and not args.allow_main:
-        raise Stop(
-            f"HEAD is on '{branch}' (the default branch). Commit on a branch "
-            f"instead, or pass --allow-main if the project really works that way.\n"
-            f"  git switch -c fix/short-description")
     if branch == "HEAD":
         raise Stop("detached HEAD; check out a branch first.")
 
@@ -364,9 +360,10 @@ def main(argv: list[str]) -> int:
             if not args.ready:
                 print("Draft PRs run no CI; use --ready when you want the run.")
 
-    # 6. watch. A draft PR runs no CI at all, so waiting would time out.
-    if args.no_watch or args.draft_pr:
-        print("agent_loop: done (CI not watched).")
+    # 6. watch. CI is manual here, so a push normally starts nothing and waiting
+    # would only time out. --watch opts in when a run is already in flight.
+    if not args.watch or args.draft_pr:
+        print("agent_loop: done (CI not watched; run it from Actions when ready).")
         return 0
     return watch(root, sha, args)
 

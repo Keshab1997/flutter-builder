@@ -1,0 +1,1201 @@
+diff -ruN a/.github/workflows/flutter-smoke-test.yml b/.github/workflows/flutter-smoke-test.yml
+--- a/.github/workflows/flutter-smoke-test.yml	2026-10-03 05:38:08.000000000 +0000
++++ b/.github/workflows/flutter-smoke-test.yml	2026-10-03 06:51:51.372924163 +0000
+@@ -14,39 +14,12 @@
+ # gradle/actions/setup-gradle (or to the runner image it expects) should fail
+ # here, not inside a user's app repository.
+ 
++# Manual only: no push or pull_request trigger. Run it from Actions -> Flutter
++# smoke test -> Run workflow when you want it. The weekly schedule below is kept
++# because it is not tied to a push: it catches upstream Flutter / Gradle /
++# runner-image breakage before callers hit it.
+ on:
+-  push:
+-    branches: [main]
+-    paths:
+-      # Everything the smoke test exercises, not just the workflow files: the
+-      # screenshots job runs the shipped scripts, so a fix inside
+-      # capture-pages.cjs (the headless-browser flags, for instance) must
+-      # re-run this workflow instead of silently skipping it.
+-      - .github/workflows/flutter-build.yml
+-      - .github/workflows/flutter-smoke-test.yml
+-      - .github/workflows/preview-cleanup.yml
+-      - .github/workflows/publish-release.yml
+-      - .github/workflows/ui-screenshots.yml
+-      - .github/workflows/web-preview.yml
+-      - scripts/capture-screenshots.sh
+-      - scripts/capture-pages.cjs
+-      - scripts/embed-screenshots.sh
+-      - tests/test_ui_screenshots.py
+-  pull_request:
+-    paths:
+-      - .github/workflows/flutter-build.yml
+-      - .github/workflows/flutter-smoke-test.yml
+-      - .github/workflows/preview-cleanup.yml
+-      - .github/workflows/publish-release.yml
+-      - .github/workflows/ui-screenshots.yml
+-      - .github/workflows/web-preview.yml
+-      - scripts/capture-screenshots.sh
+-      - scripts/capture-pages.cjs
+-      - scripts/embed-screenshots.sh
+-      - tests/test_ui_screenshots.py
+   schedule:
+-    # Weekly, even when nothing changes here: catches upstream Flutter /
+-    # Gradle / runner-image breakage before callers hit it.
+     - cron: "0 6 * * 0"
+   workflow_dispatch:
+     inputs:
+diff -ruN a/.github/workflows/installer-tests.yml b/.github/workflows/installer-tests.yml
+--- a/.github/workflows/installer-tests.yml	2026-10-03 05:38:08.000000000 +0000
++++ b/.github/workflows/installer-tests.yml	2026-10-03 06:51:55.743042996 +0000
+@@ -1,18 +1,7 @@
+ name: Test one-command installer
++# Manual only: no push or pull_request trigger. Run it from Actions -> Run
++# workflow when you have changed scripts/, the agent pack, or the tests.
+ on:
+-  push:
+-    branches: [main]
+-    paths:
+-      - scripts/**
+-      - tests/**
+-      - agent-pack/**
+-      - .github/workflows/installer-tests.yml
+-  pull_request:
+-    paths:
+-      - scripts/**
+-      - tests/**
+-      - agent-pack/**
+-      - .github/workflows/installer-tests.yml
+   workflow_dispatch:
+ 
+ permissions:
+diff -ruN a/README.md b/README.md
+--- a/README.md	2026-10-03 05:38:08.000000000 +0000
++++ b/README.md	2026-10-03 07:00:24.536885260 +0000
+@@ -6,10 +6,10 @@
+ 
+ | Workflow file | GitHub Actions-এ দেখানো নাম | কখন চলে / কী করে |
+ |---|---|---|
+-| `ci.yml` | **Flutter CI — Format, Analyze & Test** | Push, pull request ও manual run-এ Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
++| `ci.yml` | **Flutter CI — Format, Analyze & Test** | শুধু manual run-এ (Actions → Run workflow) Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
+ | `manual-build.yml` | **Build Android APK or AAB (Manual)** | Actions থেকে বেছে নিলে APK অথবা AAB build করে artifact দেয়। |
+ | `publish-release.yml` | **Publish Signed Android Release** | একবার signed APK/AAB build করে GitHub Release প্রকাশ করে; চাইলে একই AAB Google Play Internal testing-এ upload ও Play release notes পাঠায়। |
+-| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Push/PR-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
++| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Manual run-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
+ 
+ 
+ ## দ্রুত setup (প্রস্তাবিত)
+@@ -61,7 +61,7 @@
+ 
+ ## Agent pack (v1.9.0+) — agent-দের কাজ দ্রুত করার জন্য
+ 
+-AI agent দিয়ে কাজ করালে সময় নষ্ট হয় দুটো জায়গায়: push করার **আগে** ভুল ধরা পড়ে না, আর push-এর **পরে** CI-র ফল জানতে বারবার হাতে চেক করতে হয়। এই pack দুটোই কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
++AI agent দিয়ে কাজ করালে সময় নষ্ট হয় push করার **আগে** ভুল ধরা না পড়ায়। এই pack সেটা কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
+ 
+ ```bash
+ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.1/scripts/install-agent-pack.sh | bash
+@@ -73,33 +73,31 @@
+ |---|---|
+ | `tool/preflight.py` | Dart code-এ অব্যবহৃত private widget/function, অব্যবহৃত optional constructor parameter, অব্যবহৃত import, `print()` ছোঁয়া (avoid_print), একবারও ব্যবহার না হওয়া private field, orphan ফাইল ও একই নামের দুটো class একসাথে import — সব খুঁজে বের করে। খরচ ১ সেকেন্ড (SDK ছাড়া), অথচ ঠিক এই ভুলগুলোই push-কে লাল করে |
+ | `tool/ci_watch.py` | commit-এর GitHub Actions run-গুলো নিজে থেকে watch করে; শেষ হলে প্রতিটা workflow-র ফল আর fail করা job-এর আসল error লাইন ছাপায় (token: `--token-file`, `$GITHUB_TOKEN`/`$GH_TOKEN`, বা `gh auth token`) |
+-| `tool/agent_loop.py` | এক command-এ পুরো loop: preflight → secret guard → commit → push → CI watch। main-এ commit করা বা credential-এর মতো ফাইল (`keystore`, `.env`, `google-services.json`) stage করা **আগেই আটকে দেয়**, তাই agent ভুল করে একটা ধাপও বাদ দিতে পারে না |
+-| `AGENTS.md` | agent-দের playbook: এক change = এক push loop, CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
++| `tool/agent_loop.py` | এক command-এ পুরো loop: preflight → secret guard → commit → push — সরাসরি `main`-এ, কোনো branch বা PR ছাড়া। credential-এর মতো ফাইল (`keystore`, `.env`, `google-services.json`) stage করা **আগেই আটকে দেয়**, তাই agent ভুল করে একটা ধাপও বাদ দিতে পারে না; CI এখানে manual, তাই push-এর পরে অপেক্ষা করে না |
++| `AGENTS.md` | agent-দের playbook: batch loop (অনেক ছোট change → একবার CI), CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
+ 
+ ```bash
+ python3 tool/preflight.py                                   # push-এর আগে, ১ সেকেন্ড
+ python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+ python3 tool/agent_loop.py -m "..." --amend                 # আগের commit ঠিক করা
+-python3 tool/agent_loop.py -m "..." --draft-pr              # branch + draft PR (draft-এ CI চলে না)
+-python3 tool/agent_loop.py -m "..." --ready                 # draft প্রস্তুত → CI শুরু
+-python3 tool/agent_loop.py -m "..." --no-watch              # শুধু push
++python3 tool/agent_loop.py -m "..." --no-push               # শুধু commit
++python3 tool/agent_loop.py -m "..." --watch                 # কোনো run ইতিমধ্যে চললে তার জন্য অপেক্ষা
+ ```
+ 
+-Exit code: `0` = push হয়েছে (আর watched হলে সব সবুজ), `1` = CI লাল বা push fail, `2` = কিছু বদলানোর আগেই আটকে দিয়েছে। `--amend` করলে push হয় `--force-with-lease` দিয়ে — কখনো খালি `--force` নয়।
++Exit code: `0` = commit/push হয়েছে, `1` = push fail, `2` = কিছু বদলানোর আগেই আটকে দিয়েছে। `--amend` করলে push হয় `--force-with-lease` দিয়ে — কখনো খালি `--force` নয়।
+ 
+ 
+ `AGENTS.md` সবসময় **merge** হয়, replace নয়: `flutter-builder:agent-pack:start/end` marker-এর ভিতরের অংশটুকু update হয়, বাইরের সব লাইন (আপনার নিজের project notes) অপরিবর্তিত থাকে; ফাইল না থাকলে নতুন করে তৈরি হয়। Options: `--dry-run`, `--force`, `--help`।
+ 
+-### push-প্রতি duplicate run বন্ধ (নতুন caller templates)
++### CI এখন manual — batch করে একবার চালান
+ 
+-একই commit আগে দুইবার validate হত: `push` আর `pull_request` আলাদা concurrency group-এ চলত, আর web preview lane (যা ইচ্ছাকৃতভাবে serialized) একটা আরেকটার পিছনে queue-তে দাঁড়াত। নতুন caller আর shared workflow-তে:
++CI আর কোনো push বা pull request-এ নিজে থেকে চলে না। ছোট ছোট পরিবর্তন জমিয়ে, কাজ শেষ হলে **Actions → Flutter CI — Format, Analyze & Test → Run workflow** দিয়ে একবার চালান — তাতে প্রতি ছোট edit-এ একটা run খরচ হয় না।
+ 
+-- `push:` শুধু `main`-এ — feature branch-এর কাজ `pull_request` event থেকেই হয় (এক run, দুটো নয়)
+-- **draft PR**-এ CI চলে না; *Ready for review* করলেই শুরু
+-- শুধু লেখা/মেটাডেটা বদলালে (`**.md`, `docs/**`, `distribution/**`) কিছুই চলে না
+-- shared `flutter-build.yml`-এ নতুন input `skip-draft-prs` (default `true`) — চাইলে caller থেকে বন্ধ করা যায়
++- caller-এর `on:`-এ শুধু `workflow_dispatch:` থাকে — `push`/`pull_request` নেই
++- agent সরাসরি `main`-এ push করে; কোনো feature branch বা pull request লাগে না
++- CI চালানোর দায়িত্ব human-এর; agent শুধু `preflight.py` চালিয়ে নিশ্চিত হয়
+ 
+-আগে install করা project-এ এই আচরণ চাইলে caller-এর `on:`/`if:` অংশ hand-merge করুন বা `install.sh --force` (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
++আগে install করা project-এ এই আচরণ চাইলে `install.sh --force` চালান (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
+ 
+ ## CI আরও দ্রুত — build cache (v1.10+)
+ 
+@@ -165,7 +163,7 @@
+ 
+ ## Build ও release
+ 
+-- **CI**: format, analyze ও tests চালায়—সাধারণত pull request review-এর জন্য।
++- **CI**: format, analyze ও tests চালায়—এখন শুধু manual run-এ (Actions → Run workflow), batch করে একবার।
+ - **Manual APK**: ফোনে install করে পরীক্ষা করার artifact। Actions → **Build Android APK or AAB (Manual)** → Run workflow → `apk` বাছুন।
+ - **Manual AAB**: Play Store-এ upload করার Android App Bundle। একই workflow-তে `aab` বাছুন।
+ - **Publish release**: Actions → **Publish Signed Android Release** → Run workflow। এটি version/tag ও GitHub Release প্রকাশ করে, তাই আগে `pubspec.yaml`-এ version বাড়ান।
+@@ -195,7 +193,7 @@
+ 
+ ### Web preview (optional)
+ 
+-`web-preview.yml` push/PR-এ Flutter web build deploy করে। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়।
++`web-preview.yml` এখন manual — Actions → **Deploy Flutter Web Preview (GitHub Pages)** → Run workflow দিলে Flutter web build deploy হয় (push/PR-এ নিজে থেকে চলে না)। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়।
+ 
+ **সব preview এক জায়গায় (preview hub, v1.10+):** প্রতিটা deploy-এর পরে `…/<repo>/preview/` পেজটা নিজে থেকে আপডেট হয় — ওখানে সব branch-এর preview একসাথে লিস্ট হয়ে থাকে, তাই Actions run summary খোঁজার দরকার নেই:
+ 
+diff -ruN a/agent-pack/AGENTS.template.md b/agent-pack/AGENTS.template.md
+--- a/agent-pack/AGENTS.template.md	2026-10-03 05:38:08.000000000 +0000
++++ b/agent-pack/AGENTS.template.md	2026-10-03 07:00:27.546967125 +0000
+@@ -1,69 +1,73 @@
+ # AGENTS.md — {{APP_NAME}}
+ 
+ Playbook for AI agents working in this repository. Read it once at the start of
+-a session: everything here exists to keep one change loop short.
++a session: everything here exists to keep the work moving without burning CI.
+ 
+ <!-- flutter-builder:agent-pack:start v1.12.1 -->
+-## Rule #1 — CI verifies, you never push a guess
++## Rule #1 — CI is manual; preflight is your check
+ 
+-This sandbox usually has **no Flutter SDK**, and even when it does, the local
+-result would not match CI (SDK pin, Android SDK, Firebase secrets). So:
++This repository runs CI **only when the human dispatches it** (Actions → *Flutter
++CI* → Run workflow). Nothing runs on a push. So:
+ 
++- Work lands on `main` **directly** — no feature branch, no pull request.
++- Do **not** wait for a run after pushing. Nothing started; waiting only wastes
++  time.
++- `tool/preflight.py` is your only automatic check. Run it before every push —
++  it is seconds, not minutes, and catches the mistakes that would otherwise
++  surface in the next manual CI run.
+ - Do **not** run `flutter test`, `flutter analyze`, `flutter build`,
+-  `dart analyze` or `gradlew` locally to "check quickly".
+-- Use the two zero-dependency tools in `tool/` instead — they are seconds, not
+-  minutes, and they catch the mistakes that actually turn pushes red.
+-- **CI is the single source of truth.** Read its result before calling a change
+-  done; a local impression is never verification.
++  `dart analyze` or `gradlew` locally to "check quickly". The sandbox usually has
++  no Flutter SDK, and a local pass would not match CI anyway.
++- **When CI does run, it is the source of truth** — read its result before
++  calling a batch done. But it runs when the human says so, not on your push.
+ 
+ ```bash
+-python3 tool/preflight.py     # before pushing: dead code / unused params / unused imports
+-python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing lines
+-python3 tool/agent_loop.py -m "fix(scope): what changed"   # all five steps, one call
++python3 tool/preflight.py     # before every push: dead code / unused params / unused imports
++python3 tool/agent_loop.py -m "fix(scope): what changed"   # preflight + commit + push, one call
+ ```
+ 
+-## The fast loop — one change, one push, one CI round
++## The batch loop — many small changes, one push, one CI run
++
++Small edits are cheap; CI runs are not. So batch them instead of running CI per
++change:
+ 
+ 1. **Edit** the smallest diff that does one thing.
+ 2. **`python3 tool/preflight.py`** — 1 second, no SDK. Fix what it reports.
+-3. **Commit.** While the branch is still yours, `git commit --amend` instead of
+-   piling "fix ci" commits on top.
+-4. **Push once.** Never push WIP "to see what happens". If you have several
+-   things to try, open the PR as a **draft** — drafts do not run CI, so iterate
+-   freely; mark *Ready for review* when you want the run.
+-5. **`python3 tool/ci_watch.py`** — it polls for you (no turn-by-turn waiting)
+-   and prints the conclusion of every workflow plus the interesting lines of
+-   the failed ones.
+-6. **Red?** Fix → `git commit --amend` → `git push --force-with-lease` →
+-   watch again. One more round, not five.
+-
+-Rules of thumb: ten 30-second pushes waste more time than one 3-minute CI run.
+-Read the CI log before editing; guessing at a red build doubles the rounds.
++3. **Commit and push to `main`.** `python3 tool/agent_loop.py -m "…"` does
++   preflight, the secret guard, the commit and the push in one call. Repeat for
++   each small change; every commit goes straight to `main`.
++4. **Do not wait for CI.** Nothing started. Keep working.
++5. **When the batch is ready, tell the human** to run CI once (Actions → *Flutter
++   CI* → Run workflow). If a run is already in flight, `python3 tool/ci_watch.py`
++   prints the conclusion of every workflow plus the interesting lines of the
++   failed ones.
++
++Rules of thumb: a CI run per push wastes the most time; push freely, run CI once
++per batch. When a red run does arrive, read the log before editing — guessing at
++a red build doubles the rounds.
+ 
+ ### The same loop as one command
+ 
+-`tool/agent_loop.py` performs steps 2-5 in a single call, and stops before the
+-first thing that would waste a run:
++`tool/agent_loop.py` performs preflight, the secret guard, the commit and the
++push in a single call:
+ 
+ ```bash
+ python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+ python3 tool/agent_loop.py -m "fix(profile): drop the unused import" --amend
+-python3 tool/agent_loop.py -m "feat(cv): add PDF export" --draft-pr
+-python3 tool/agent_loop.py -m "..." --ready          # drafts run no CI: this starts it
+-python3 tool/agent_loop.py -m "..." --no-watch       # push and return immediately
++python3 tool/agent_loop.py -m "chore: wip" --no-push     # commit without pushing
++python3 tool/agent_loop.py -m "…" --watch                # wait, only if a run is in flight
+ ```
+ 
+ It refuses, before touching the repository, when
+ 
+-- HEAD is the default branch (`main`/`master`) — use a branch, or `--allow-main`
+-  when the project really works that way;
+ - a staged file looks like a credential (`.env`, `*.jks`, `*.keystore`, `*.pem`,
+   `key.properties`, `google-services.json`, `secrets/**`, …) — a refusal costs
+   one edit, a leaked keystore costs a rotation;
+ - `preflight.py` reports anything — use `--no-preflight` only when the findings
+   are deliberate.
+ 
+-Exit codes: `0` pushed (and green when watched), `1` CI red or push failed,
++It commits on the current branch (normally `main`) and pushes there; no branch,
++no pull request. Exit codes: `0` committed/pushed, `1` the push failed,
+ `2` refused before changing anything. An `--amend` push uses
+ `--force-with-lease`, never a bare `--force`.
+ 
+@@ -83,6 +87,8 @@
+ * **Use it before and after a UI change.** Before: see what the screen looks
+   like now. After: see what your change did. A green CI says the code compiles;
+   only the picture says the layout is right.
++* This is the one thing that does start a run — it dispatches the UI-screenshots
++  workflow itself, so use it deliberately, not on every edit.
+ * The routes are the app's own (`/settings`, `/profile`) — the same names the
+   app navigates to. A screen behind a login or several taps cannot be reached
+   this way; ask the human for a screenshot of that one instead.
+@@ -94,25 +100,24 @@
+   artifacts: never commit them, and never use one as a test fixture.
+ * No token? `gh auth login` once, or pass `--token-file`.
+ 
+-## What a push costs here (and why it is already cheap)
++## What a push costs here
+ 
+ | Situation | What runs |
+ |---|---|
+-| Push to a feature branch **with an open PR** | the PR event only — the push trigger is main-only, so no duplicate |
+-| Push to `main` | CI (+ Web Preview) once |
+-| **Draft** PR | nothing, until you press *Ready for review* |
+-| Docs-only change (`**.md`, `docs/**`, `distribution/**`) | nothing (excluded by `paths-ignore`) |
+-| Merge | CI on `main` + Web Preview deploy |
++| Push to `main` (any change) | nothing — CI is manual |
++| Docs-only change (`**.md`, `docs/**`, `distribution/**`) | nothing |
++| You ask the human to run CI | CI once, for the whole batch |
++| `see_screen.py` | the UI-screenshots workflow, once per call |
+ 
+-If a run is cancelled or skipped, do **not** retrigger it with an empty commit —
+-use *Actions → Run workflow* or the re-run API call.
++If you want a run right now, do **not** retrigger it with an empty commit — use
++*Actions → Run workflow* (or ask the human to).
+ 
+ ## CI map
+ 
+ | Workflow | Runs when | What it does |
+ |---|---|---|
+-| `ci.yml` → shared `flutter-build.yml` | push to main, PRs | `dart format` check → `flutter analyze --fatal-infos` → `flutter test` + coverage |
+-| `web-preview.yml` | push to main, PRs | builds the web app, deploys `preview/<branch>/` to GitHub Pages (a branch delete removes its preview) |
++| `ci.yml` → shared `flutter-build.yml` | **manual** (`workflow_dispatch`) | `dart format` check → `flutter analyze --fatal-infos` → `flutter test` + coverage |
++| `web-preview.yml` | manual dispatch, branch delete | builds the web app, deploys `preview/<branch>/` to GitHub Pages |
+ | `manual-build.yml` | manual dispatch | APK / AAB artifact |
+ | `publish-release.yml` | manual dispatch | signed build → tag → GitHub Release (+ Play internal if configured) |
+ | `release.yml` | `v*` tag push | signed AAB artifact for the tag |
+@@ -149,10 +154,8 @@
+ 
+ - **Small, focused diffs.** One concern per commit; conventional commit
+   messages (`fix(profile): …`, `feat(cv): …`, `chore(ci): …`).
+-- **Branch + PR** for anything non-trivial; keep the branch name descriptive.
+-  Docs-only fixes may go straight to `main` when the project allows it.
+-- **Merge only when green.** Delete the branch after merging — the preview
+-  cleanup runs automatically.
++- **Push straight to `main`.** No feature branch, no pull request. Batch small
++  changes and let the human run CI once at the end.
+ - **Secrets never enter git:** `google-services.json`, `android/key.properties`,
+   `*.jks` / `*.keystore`, `.pem`, tokens. CI receives them from repository
+   secrets. Do not add them to the repo to "make CI pass".
+@@ -162,10 +165,10 @@
+ 
+ ## Ask the human before
+ 
+-- merging to `main` (when the project wants review), **tagging a release**, or
+-  touching workflows / secrets / repository settings;
+-- force-pushing a branch you do not own, rewriting published history, or
+-  deleting branches, tags, or repository content;
++- running CI, when a batch is ready to be checked (they own the run button);
++- **tagging a release**, or touching workflows / secrets / repository settings;
++- force-pushing over history you do not own, or deleting branches, tags, or
++  repository content;
+ - anything that publishes publicly, spends money, or is irreversible.
+ 
+ <!-- flutter-builder:agent-pack:end -->
+Binary files a/agent-pack/__pycache__/see_screen.cpython-312.pyc and b/agent-pack/__pycache__/see_screen.cpython-312.pyc differ
+diff -ruN a/agent-pack/agent_loop.py b/agent-pack/agent_loop.py
+--- a/agent-pack/agent_loop.py	2026-10-03 05:38:08.000000000 +0000
++++ b/agent-pack/agent_loop.py	2026-10-03 06:51:07.961754094 +0000
+@@ -1,25 +1,26 @@
+ #!/usr/bin/env python3
+ """agent_loop.py - one command for one full change loop.
+ 
+-An agent working in this repository normally spends four or five tool calls
+-per iteration: run preflight, commit, push, wait for CI, read the failure.
+-Every one of those calls is a place where the loop can be abandoned halfway -
+-a push without a preflight, a CI run nobody read, a commit made on `main`.
++An agent working in this repository normally spends several tool calls per
++iteration: run preflight, commit, push, wait for CI, read the failure. Every one
++of those calls is a place where the loop can be abandoned halfway.
+ 
+-This script performs the whole loop in one call and stops at the first thing
+-that would waste a CI run:
++This script performs the loop in one call:
+ 
+-    preflight  ->  secret guard  ->  commit  ->  push  ->  ci_watch
++    preflight  ->  secret guard  ->  commit  ->  push
+ 
+     python3 tool/agent_loop.py -m "fix(profile): guard null avatar"
+     python3 tool/agent_loop.py -m "..." --amend          # fix the last commit
+-    python3 tool/agent_loop.py -m "..." --draft-pr       # branch + draft PR
+-    python3 tool/agent_loop.py -m "..." --no-watch       # push and stop
++    python3 tool/agent_loop.py -m "..." --no-push        # commit only
++
++Work happens on the current branch (normally `main`) and is pushed straight
++there - no feature branch, no pull request. CI is manual in this setup (see
++AGENTS.md): nothing runs on a push, so this loop does not wait for a run. Batch
++your edits and let the human dispatch CI once when the batch is ready; pass
++`--watch` only when a run is already in flight.
+ 
+ What it refuses to do, on purpose:
+ 
+-  * commit on the default branch (main/master) unless `--allow-main` is given:
+-    nobody reviews a change that never left main, and CI there is not free;
+   * commit a file that looks like a credential (`.env`, `*.jks`, `*.keystore`,
+     `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
+     unless `--allow-secret-paths` is given: the playbook says secrets never
+@@ -27,8 +28,8 @@
+   * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
+     given: those findings are exactly what turns a push red.
+ 
+-Exit codes: 0 = pushed (and green, when watched); 1 = CI failed or the push
+-failed; 2 = refused or stopped before anything was changed.
++Exit codes: 0 = pushed (or committed with --no-push); 1 = the push failed;
++2 = refused or stopped before anything was changed.
+ 
+ Standard library only, python3 >= 3.8. `git` must be on PATH.
+ """
+@@ -235,21 +236,22 @@
+ def main(argv: list[str]) -> int:
+     parser = argparse.ArgumentParser(
+         prog="agent_loop.py",
+-        description="preflight -> commit -> push -> watch CI, in one call.")
++        description="preflight -> commit -> push, in one call.")
+     parser.add_argument("-m", "--message", help="commit message (conventional commits)")
+     parser.add_argument("--amend", action="store_true",
+                         help="amend the last commit (pushes with --force-with-lease)")
+     parser.add_argument("--paths", nargs="*", default=None,
+                         help="paths to stage (default: everything changed)")
+-    parser.add_argument("--allow-main", action="store_true",
+-                        help="permit a commit on the default branch")
+     parser.add_argument("--allow-secret-paths", action="store_true",
+                         help="stage files that look like credentials (review them first)")
+     parser.add_argument("--no-preflight", action="store_true",
+                         help="skip tool/preflight.py (CI will be the first check)")
+     parser.add_argument("--no-push", action="store_true", help="commit only")
++    parser.add_argument("--watch", action="store_true",
++                        help="wait for this commit's CI run (CI is manual here, "
++                             "so only after a run is already in flight)")
+     parser.add_argument("--no-watch", action="store_true",
+-                        help="push and return (useful for draft pull requests)")
++                        help="accepted for compatibility; not watching is the default")
+     parser.add_argument("--draft-pr", action="store_true",
+                         help="open a draft pull request for this branch")
+     parser.add_argument("--ready", action="store_true",
+@@ -262,18 +264,12 @@
+ 
+     if not args.message and not args.amend:
+         parser.error("give -m/--message (or --amend to reuse the previous message)")
+-    if args.no_preflight and not (args.no_watch or args.no_push):
+-        print("agent_loop: --no-preflight with a watched push means CI is the "
+-              "first check; that is exactly the slow path this tool avoids.")
++    if args.no_preflight and args.watch:
++        print("agent_loop: --no-preflight with --watch means CI is the first "
++              "check; that is exactly the slow path this tool avoids.")
+ 
+     root = repo_root()
+     branch = git_out("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+-    base = default_branch(root)
+-    if branch == base and not args.allow_main:
+-        raise Stop(
+-            f"HEAD is on '{branch}' (the default branch). Commit on a branch "
+-            f"instead, or pass --allow-main if the project really works that way.\n"
+-            f"  git switch -c fix/short-description")
+     if branch == "HEAD":
+         raise Stop("detached HEAD; check out a branch first.")
+ 
+@@ -364,9 +360,10 @@
+             if not args.ready:
+                 print("Draft PRs run no CI; use --ready when you want the run.")
+ 
+-    # 6. watch. A draft PR runs no CI at all, so waiting would time out.
+-    if args.no_watch or args.draft_pr:
+-        print("agent_loop: done (CI not watched).")
++    # 6. watch. CI is manual here, so a push normally starts nothing and waiting
++    # would only time out. --watch opts in when a run is already in flight.
++    if not args.watch or args.draft_pr:
++        print("agent_loop: done (CI not watched; run it from Actions when ready).")
+         return 0
+     return watch(root, sha, args)
+ 
+diff -ruN a/examples/project-workflows/ci.yml b/examples/project-workflows/ci.yml
+--- a/examples/project-workflows/ci.yml	2026-10-03 05:38:08.000000000 +0000
++++ b/examples/project-workflows/ci.yml	2026-10-03 06:51:31.202375564 +0000
+@@ -1,16 +1,9 @@
+ name: Flutter CI — Format, Analyze & Test
+ 
+-# Validates every pull request; on main it validates the merge result.
++# Manual only: nothing runs on push or pull request. Batch your changes, then
++# run this once from Actions -> Flutter CI — Format, Analyze & Test -> Run
++# workflow. That keeps small edits from spending a CI run each.
+ on:
+-  pull_request:
+-    branches: [main]
+-  push:
+-    branches: [main]
+-    # Prose and store metadata cannot change a Dart build: skip the run.
+-    paths-ignore:
+-      - "**.md"
+-      - "docs/**"
+-      - "distribution/**"
+   workflow_dispatch:
+ 
+ permissions:
+@@ -22,9 +15,6 @@
+ 
+ jobs:
+   ci:
+-    # A draft pull request is a scratchpad: CI starts when it is marked ready
+-    # for review, so iterating costs no runs at all.
+-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.12.1
+     with:
+       flutter-channel: stable
+diff -ruN a/examples/project-workflows/ui-screenshots.yml b/examples/project-workflows/ui-screenshots.yml
+--- a/examples/project-workflows/ui-screenshots.yml	2026-10-03 05:38:08.000000000 +0000
++++ b/examples/project-workflows/ui-screenshots.yml	2026-10-03 07:00:01.506258866 +0000
+@@ -1,13 +1,11 @@
+ name: Flutter UI screenshots
+ 
+-# Drop this file into <app>/.github/workflows/ and every pull request gets
+-# pictures of the changed screens without anyone installing the app.
+-#
+-# It also runs on demand: Actions -> "Flutter UI screenshots" -> Run workflow,
+-# type the routes you want photographed (`/settings,/profile`). An agent can do
+-# the same from the command line - `python3 tool/see_screen.py --route /settings`
+-# from the flutter-builder agent pack dispatches this, waits and downloads the
+-# images, so a change can be *looked at* instead of guessed at.
++# Drop this file into <app>/.github/workflows/ and run it from Actions ->
++# "Flutter UI screenshots" -> Run workflow, typing the routes you want
++# photographed (`/settings,/profile`). It is manual only: nothing runs on a push
++# or pull request. An agent can drive it too - `python3 tool/see_screen.py
++# --route /settings` from the flutter-builder agent pack dispatches this, waits
++# and downloads the images, so a change can be *looked at* instead of guessed at.
+ #
+ # The app needs web support (`web/` in the repository, or set
+ # `generate-web-platform: true` below). Apps that use platform-only plugins
+@@ -15,7 +13,6 @@
+ # step reports a blank screen instead of showing one silently.
+ 
+ on:
+-  pull_request:
+   workflow_dispatch:
+     inputs:
+       routes:
+@@ -55,9 +52,6 @@
+ 
+ jobs:
+   ui:
+-    # A draft pull request is a scratchpad: screenshots start when it is marked
+-    # ready for review, so iterating costs nothing.
+-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+     # v1.12.1 is the first release that ships this workflow (older tags do not
+     # contain the file). Move this pin forward with scripts/bump-ref.sh.
+     uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.12.1
+diff -ruN a/examples/project-workflows/web-preview.yml b/examples/project-workflows/web-preview.yml
+--- a/examples/project-workflows/web-preview.yml	2026-10-03 05:38:08.000000000 +0000
++++ b/examples/project-workflows/web-preview.yml	2026-10-03 06:59:56.886133210 +0000
+@@ -1,8 +1,11 @@
+ name: Deploy Flutter Web Preview (GitHub Pages)
+ 
+-# Builds the app for the web on pull requests and on main, and publishes it to
+-# GitHub Pages under preview/<branch>, so you can test the app by opening a URL
+-# in a browser instead of downloading and installing an APK.
++# Builds the app for the web and publishes it to GitHub Pages under
++# preview/<branch>, so you can test the app by opening a URL in a browser
++# instead of downloading and installing an APK.
++#
++# Manual only: run it from Actions -> Run workflow when you want a fresh
++# preview; nothing runs on a push or pull request.
+ #
+ # One-time setup: Settings -> Pages -> Deploy from a branch -> gh-pages (root).
+ # The first run creates the gh-pages branch.
+@@ -11,19 +14,9 @@
+ # `delete` event, so gh-pages does not keep a web bundle for every dead branch.
+ # GitHub runs delete-triggered workflows from the default branch, so merge this
+ # file before relying on that.
+-#
+-# The push trigger is main-only on purpose: a branch with an open pull request
+-# already builds through the pull_request event, and running both fired two
+-# deploys for one push against the shared gh-pages branch.
+ 
+ on:
+-  push:
+-    branches: [main]
+-    paths-ignore:
+-      - "**.md"
+-      - "docs/**"
+-      - "distribution/**"
+-  pull_request:
++  workflow_dispatch:
+   delete:
+ 
+ permissions:
+diff -ruN a/scripts/install-agent-pack.sh b/scripts/install-agent-pack.sh
+--- a/scripts/install-agent-pack.sh	2026-10-03 05:38:08.000000000 +0000
++++ b/scripts/install-agent-pack.sh	2026-10-03 07:00:29.817028864 +0000
+@@ -804,25 +804,26 @@
+ #!/usr/bin/env python3
+ """agent_loop.py - one command for one full change loop.
+ 
+-An agent working in this repository normally spends four or five tool calls
+-per iteration: run preflight, commit, push, wait for CI, read the failure.
+-Every one of those calls is a place where the loop can be abandoned halfway -
+-a push without a preflight, a CI run nobody read, a commit made on `main`.
++An agent working in this repository normally spends several tool calls per
++iteration: run preflight, commit, push, wait for CI, read the failure. Every one
++of those calls is a place where the loop can be abandoned halfway.
+ 
+-This script performs the whole loop in one call and stops at the first thing
+-that would waste a CI run:
++This script performs the loop in one call:
+ 
+-    preflight  ->  secret guard  ->  commit  ->  push  ->  ci_watch
++    preflight  ->  secret guard  ->  commit  ->  push
+ 
+     python3 tool/agent_loop.py -m "fix(profile): guard null avatar"
+     python3 tool/agent_loop.py -m "..." --amend          # fix the last commit
+-    python3 tool/agent_loop.py -m "..." --draft-pr       # branch + draft PR
+-    python3 tool/agent_loop.py -m "..." --no-watch       # push and stop
++    python3 tool/agent_loop.py -m "..." --no-push        # commit only
++
++Work happens on the current branch (normally `main`) and is pushed straight
++there - no feature branch, no pull request. CI is manual in this setup (see
++AGENTS.md): nothing runs on a push, so this loop does not wait for a run. Batch
++your edits and let the human dispatch CI once when the batch is ready; pass
++`--watch` only when a run is already in flight.
+ 
+ What it refuses to do, on purpose:
+ 
+-  * commit on the default branch (main/master) unless `--allow-main` is given:
+-    nobody reviews a change that never left main, and CI there is not free;
+   * commit a file that looks like a credential (`.env`, `*.jks`, `*.keystore`,
+     `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
+     unless `--allow-secret-paths` is given: the playbook says secrets never
+@@ -830,8 +831,8 @@
+   * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
+     given: those findings are exactly what turns a push red.
+ 
+-Exit codes: 0 = pushed (and green, when watched); 1 = CI failed or the push
+-failed; 2 = refused or stopped before anything was changed.
++Exit codes: 0 = pushed (or committed with --no-push); 1 = the push failed;
++2 = refused or stopped before anything was changed.
+ 
+ Standard library only, python3 >= 3.8. `git` must be on PATH.
+ """
+@@ -1038,21 +1039,22 @@
+ def main(argv: list[str]) -> int:
+     parser = argparse.ArgumentParser(
+         prog="agent_loop.py",
+-        description="preflight -> commit -> push -> watch CI, in one call.")
++        description="preflight -> commit -> push, in one call.")
+     parser.add_argument("-m", "--message", help="commit message (conventional commits)")
+     parser.add_argument("--amend", action="store_true",
+                         help="amend the last commit (pushes with --force-with-lease)")
+     parser.add_argument("--paths", nargs="*", default=None,
+                         help="paths to stage (default: everything changed)")
+-    parser.add_argument("--allow-main", action="store_true",
+-                        help="permit a commit on the default branch")
+     parser.add_argument("--allow-secret-paths", action="store_true",
+                         help="stage files that look like credentials (review them first)")
+     parser.add_argument("--no-preflight", action="store_true",
+                         help="skip tool/preflight.py (CI will be the first check)")
+     parser.add_argument("--no-push", action="store_true", help="commit only")
++    parser.add_argument("--watch", action="store_true",
++                        help="wait for this commit's CI run (CI is manual here, "
++                             "so only after a run is already in flight)")
+     parser.add_argument("--no-watch", action="store_true",
+-                        help="push and return (useful for draft pull requests)")
++                        help="accepted for compatibility; not watching is the default")
+     parser.add_argument("--draft-pr", action="store_true",
+                         help="open a draft pull request for this branch")
+     parser.add_argument("--ready", action="store_true",
+@@ -1065,18 +1067,12 @@
+ 
+     if not args.message and not args.amend:
+         parser.error("give -m/--message (or --amend to reuse the previous message)")
+-    if args.no_preflight and not (args.no_watch or args.no_push):
+-        print("agent_loop: --no-preflight with a watched push means CI is the "
+-              "first check; that is exactly the slow path this tool avoids.")
++    if args.no_preflight and args.watch:
++        print("agent_loop: --no-preflight with --watch means CI is the first "
++              "check; that is exactly the slow path this tool avoids.")
+ 
+     root = repo_root()
+     branch = git_out("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+-    base = default_branch(root)
+-    if branch == base and not args.allow_main:
+-        raise Stop(
+-            f"HEAD is on '{branch}' (the default branch). Commit on a branch "
+-            f"instead, or pass --allow-main if the project really works that way.\n"
+-            f"  git switch -c fix/short-description")
+     if branch == "HEAD":
+         raise Stop("detached HEAD; check out a branch first.")
+ 
+@@ -1167,9 +1163,10 @@
+             if not args.ready:
+                 print("Draft PRs run no CI; use --ready when you want the run.")
+ 
+-    # 6. watch. A draft PR runs no CI at all, so waiting would time out.
+-    if args.no_watch or args.draft_pr:
+-        print("agent_loop: done (CI not watched).")
++    # 6. watch. CI is manual here, so a push normally starts nothing and waiting
++    # would only time out. --watch opts in when a run is already in flight.
++    if not args.watch or args.draft_pr:
++        print("agent_loop: done (CI not watched; run it from Actions when ready).")
+         return 0
+     return watch(root, sha, args)
+ 
+@@ -1589,69 +1586,73 @@
+ # AGENTS.md — {{APP_NAME}}
+ 
+ Playbook for AI agents working in this repository. Read it once at the start of
+-a session: everything here exists to keep one change loop short.
++a session: everything here exists to keep the work moving without burning CI.
+ 
+ <!-- flutter-builder:agent-pack:start v1.12.1 -->
+-## Rule #1 — CI verifies, you never push a guess
++## Rule #1 — CI is manual; preflight is your check
+ 
+-This sandbox usually has **no Flutter SDK**, and even when it does, the local
+-result would not match CI (SDK pin, Android SDK, Firebase secrets). So:
++This repository runs CI **only when the human dispatches it** (Actions → *Flutter
++CI* → Run workflow). Nothing runs on a push. So:
+ 
++- Work lands on `main` **directly** — no feature branch, no pull request.
++- Do **not** wait for a run after pushing. Nothing started; waiting only wastes
++  time.
++- `tool/preflight.py` is your only automatic check. Run it before every push —
++  it is seconds, not minutes, and catches the mistakes that would otherwise
++  surface in the next manual CI run.
+ - Do **not** run `flutter test`, `flutter analyze`, `flutter build`,
+-  `dart analyze` or `gradlew` locally to "check quickly".
+-- Use the two zero-dependency tools in `tool/` instead — they are seconds, not
+-  minutes, and they catch the mistakes that actually turn pushes red.
+-- **CI is the single source of truth.** Read its result before calling a change
+-  done; a local impression is never verification.
++  `dart analyze` or `gradlew` locally to "check quickly". The sandbox usually has
++  no Flutter SDK, and a local pass would not match CI anyway.
++- **When CI does run, it is the source of truth** — read its result before
++  calling a batch done. But it runs when the human says so, not on your push.
+ 
+ ```bash
+-python3 tool/preflight.py     # before pushing: dead code / unused params / unused imports
+-python3 tool/ci_watch.py      # after pushing: waits for CI, prints the failing lines
+-python3 tool/agent_loop.py -m "fix(scope): what changed"   # all five steps, one call
++python3 tool/preflight.py     # before every push: dead code / unused params / unused imports
++python3 tool/agent_loop.py -m "fix(scope): what changed"   # preflight + commit + push, one call
+ ```
+ 
+-## The fast loop — one change, one push, one CI round
++## The batch loop — many small changes, one push, one CI run
++
++Small edits are cheap; CI runs are not. So batch them instead of running CI per
++change:
+ 
+ 1. **Edit** the smallest diff that does one thing.
+ 2. **`python3 tool/preflight.py`** — 1 second, no SDK. Fix what it reports.
+-3. **Commit.** While the branch is still yours, `git commit --amend` instead of
+-   piling "fix ci" commits on top.
+-4. **Push once.** Never push WIP "to see what happens". If you have several
+-   things to try, open the PR as a **draft** — drafts do not run CI, so iterate
+-   freely; mark *Ready for review* when you want the run.
+-5. **`python3 tool/ci_watch.py`** — it polls for you (no turn-by-turn waiting)
+-   and prints the conclusion of every workflow plus the interesting lines of
+-   the failed ones.
+-6. **Red?** Fix → `git commit --amend` → `git push --force-with-lease` →
+-   watch again. One more round, not five.
+-
+-Rules of thumb: ten 30-second pushes waste more time than one 3-minute CI run.
+-Read the CI log before editing; guessing at a red build doubles the rounds.
++3. **Commit and push to `main`.** `python3 tool/agent_loop.py -m "…"` does
++   preflight, the secret guard, the commit and the push in one call. Repeat for
++   each small change; every commit goes straight to `main`.
++4. **Do not wait for CI.** Nothing started. Keep working.
++5. **When the batch is ready, tell the human** to run CI once (Actions → *Flutter
++   CI* → Run workflow). If a run is already in flight, `python3 tool/ci_watch.py`
++   prints the conclusion of every workflow plus the interesting lines of the
++   failed ones.
++
++Rules of thumb: a CI run per push wastes the most time; push freely, run CI once
++per batch. When a red run does arrive, read the log before editing — guessing at
++a red build doubles the rounds.
+ 
+ ### The same loop as one command
+ 
+-`tool/agent_loop.py` performs steps 2-5 in a single call, and stops before the
+-first thing that would waste a run:
++`tool/agent_loop.py` performs preflight, the secret guard, the commit and the
++push in a single call:
+ 
+ ```bash
+ python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
+ python3 tool/agent_loop.py -m "fix(profile): drop the unused import" --amend
+-python3 tool/agent_loop.py -m "feat(cv): add PDF export" --draft-pr
+-python3 tool/agent_loop.py -m "..." --ready          # drafts run no CI: this starts it
+-python3 tool/agent_loop.py -m "..." --no-watch       # push and return immediately
++python3 tool/agent_loop.py -m "chore: wip" --no-push     # commit without pushing
++python3 tool/agent_loop.py -m "…" --watch                # wait, only if a run is in flight
+ ```
+ 
+ It refuses, before touching the repository, when
+ 
+-- HEAD is the default branch (`main`/`master`) — use a branch, or `--allow-main`
+-  when the project really works that way;
+ - a staged file looks like a credential (`.env`, `*.jks`, `*.keystore`, `*.pem`,
+   `key.properties`, `google-services.json`, `secrets/**`, …) — a refusal costs
+   one edit, a leaked keystore costs a rotation;
+ - `preflight.py` reports anything — use `--no-preflight` only when the findings
+   are deliberate.
+ 
+-Exit codes: `0` pushed (and green when watched), `1` CI red or push failed,
++It commits on the current branch (normally `main`) and pushes there; no branch,
++no pull request. Exit codes: `0` committed/pushed, `1` the push failed,
+ `2` refused before changing anything. An `--amend` push uses
+ `--force-with-lease`, never a bare `--force`.
+ 
+@@ -1671,6 +1672,8 @@
+ * **Use it before and after a UI change.** Before: see what the screen looks
+   like now. After: see what your change did. A green CI says the code compiles;
+   only the picture says the layout is right.
++* This is the one thing that does start a run — it dispatches the UI-screenshots
++  workflow itself, so use it deliberately, not on every edit.
+ * The routes are the app's own (`/settings`, `/profile`) — the same names the
+   app navigates to. A screen behind a login or several taps cannot be reached
+   this way; ask the human for a screenshot of that one instead.
+@@ -1682,25 +1685,24 @@
+   artifacts: never commit them, and never use one as a test fixture.
+ * No token? `gh auth login` once, or pass `--token-file`.
+ 
+-## What a push costs here (and why it is already cheap)
++## What a push costs here
+ 
+ | Situation | What runs |
+ |---|---|
+-| Push to a feature branch **with an open PR** | the PR event only — the push trigger is main-only, so no duplicate |
+-| Push to `main` | CI (+ Web Preview) once |
+-| **Draft** PR | nothing, until you press *Ready for review* |
+-| Docs-only change (`**.md`, `docs/**`, `distribution/**`) | nothing (excluded by `paths-ignore`) |
+-| Merge | CI on `main` + Web Preview deploy |
++| Push to `main` (any change) | nothing — CI is manual |
++| Docs-only change (`**.md`, `docs/**`, `distribution/**`) | nothing |
++| You ask the human to run CI | CI once, for the whole batch |
++| `see_screen.py` | the UI-screenshots workflow, once per call |
+ 
+-If a run is cancelled or skipped, do **not** retrigger it with an empty commit —
+-use *Actions → Run workflow* or the re-run API call.
++If you want a run right now, do **not** retrigger it with an empty commit — use
++*Actions → Run workflow* (or ask the human to).
+ 
+ ## CI map
+ 
+ | Workflow | Runs when | What it does |
+ |---|---|---|
+-| `ci.yml` → shared `flutter-build.yml` | push to main, PRs | `dart format` check → `flutter analyze --fatal-infos` → `flutter test` + coverage |
+-| `web-preview.yml` | push to main, PRs | builds the web app, deploys `preview/<branch>/` to GitHub Pages (a branch delete removes its preview) |
++| `ci.yml` → shared `flutter-build.yml` | **manual** (`workflow_dispatch`) | `dart format` check → `flutter analyze --fatal-infos` → `flutter test` + coverage |
++| `web-preview.yml` | manual dispatch, branch delete | builds the web app, deploys `preview/<branch>/` to GitHub Pages |
+ | `manual-build.yml` | manual dispatch | APK / AAB artifact |
+ | `publish-release.yml` | manual dispatch | signed build → tag → GitHub Release (+ Play internal if configured) |
+ | `release.yml` | `v*` tag push | signed AAB artifact for the tag |
+@@ -1737,10 +1739,8 @@
+ 
+ - **Small, focused diffs.** One concern per commit; conventional commit
+   messages (`fix(profile): …`, `feat(cv): …`, `chore(ci): …`).
+-- **Branch + PR** for anything non-trivial; keep the branch name descriptive.
+-  Docs-only fixes may go straight to `main` when the project allows it.
+-- **Merge only when green.** Delete the branch after merging — the preview
+-  cleanup runs automatically.
++- **Push straight to `main`.** No feature branch, no pull request. Batch small
++  changes and let the human run CI once at the end.
+ - **Secrets never enter git:** `google-services.json`, `android/key.properties`,
+   `*.jks` / `*.keystore`, `.pem`, tokens. CI receives them from repository
+   secrets. Do not add them to the repo to "make CI pass".
+@@ -1750,10 +1750,10 @@
+ 
+ ## Ask the human before
+ 
+-- merging to `main` (when the project wants review), **tagging a release**, or
+-  touching workflows / secrets / repository settings;
+-- force-pushing a branch you do not own, rewriting published history, or
+-  deleting branches, tags, or repository content;
++- running CI, when a batch is ready to be checked (they own the run button);
++- **tagging a release**, or touching workflows / secrets / repository settings;
++- force-pushing over history you do not own, or deleting branches, tags, or
++  repository content;
+ - anything that publishes publicly, spends money, or is irreversible.
+ 
+ <!-- flutter-builder:agent-pack:end -->
+diff -ruN a/scripts/install.sh b/scripts/install.sh
+--- a/scripts/install.sh	2026-10-03 05:38:08.000000000 +0000
++++ b/scripts/install.sh	2026-10-03 07:00:07.366418255 +0000
+@@ -145,20 +145,10 @@
+   cat <<'YAML'
+ name: Flutter CI — Format, Analyze & Test
+ 
+-# Validates every pull request; on main it validates the merge result. The push
+-# trigger is main-only on purpose: a feature branch with an open pull request
+-# already runs through the pull_request event, and running both validated the
+-# same commit twice under different concurrency groups.
++# Manual only: nothing runs on push or pull request. Batch your changes, then
++# run this once from Actions -> Flutter CI — Format, Analyze & Test -> Run
++# workflow. That keeps small edits from spending a CI run each.
+ on:
+-  pull_request:
+-    branches: [main]
+-  push:
+-    branches: [main]
+-    # Prose and store metadata cannot change a Dart build: skip the run.
+-    paths-ignore:
+-      - "**.md"
+-      - "docs/**"
+-      - "distribution/**"
+   workflow_dispatch:
+ 
+ permissions:
+@@ -170,9 +160,6 @@
+ 
+ jobs:
+   ci:
+-    # A draft pull request is a scratchpad: CI starts when it is marked ready
+-    # for review, so iterating costs no runs at all.
+-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+ YAML
+   printf '    uses: %s/flutter-build.yml@%s\n' "$REUSABLE" "$ref"
+   cat <<'YAML'
+@@ -276,24 +263,16 @@
+   cat <<'YAML'
+ name: Deploy Flutter Web Preview (GitHub Pages)
+ 
+-# Builds the app for the web on every push and pull request and publishes it
+-# to GitHub Pages under preview/<branch>: test the app by opening a URL in a
+-# browser instead of installing an APK. One-time setup: Settings -> Pages ->
+-# Build and deployment -> Deploy from a branch -> gh-pages (root); the first
+-# run creates the branch. Needs the web platform (flutter create --platforms
+-# web .); plugins without web support will not work in the preview.
+-#
+-# The push trigger is main-only on purpose: a branch with an open pull request
+-# already builds through the pull_request event, and running both fired two
+-# deploys for one push against the shared gh-pages branch.
++# Builds the app for the web and publishes it to GitHub Pages under
++# preview/<branch>: test the app by opening a URL in a browser instead of
++# installing an APK. Manual only: run it from Actions -> Run workflow when you
++# want a fresh preview; nothing runs on a push or pull request. One-time setup:
++# Settings -> Pages -> Build and deployment -> Deploy from a branch -> gh-pages
++# (root); the first run creates the branch. Needs the web platform (flutter
++# create --platforms web .); plugins without web support will not work in the
++# preview.
+ on:
+-  push:
+-    branches: [main]
+-    paths-ignore:
+-      - "**.md"
+-      - "docs/**"
+-      - "distribution/**"
+-  pull_request:
++  workflow_dispatch:
+   delete:
+ 
+ permissions:
+Binary files a/tests/__pycache__/test_about_link.cpython-312.pyc and b/tests/__pycache__/test_about_link.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_agent_loop.cpython-312.pyc and b/tests/__pycache__/test_agent_loop.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_agent_pack.cpython-312.pyc and b/tests/__pycache__/test_agent_pack.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_build_caching.cpython-312.pyc and b/tests/__pycache__/test_build_caching.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_bump_ref.cpython-312.pyc and b/tests/__pycache__/test_bump_ref.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_ci_speedups.cpython-312.pyc and b/tests/__pycache__/test_ci_speedups.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_install.cpython-312.pyc and b/tests/__pycache__/test_install.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_preview_cleanup.cpython-312.pyc and b/tests/__pycache__/test_preview_cleanup.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_preview_hub.cpython-312.pyc and b/tests/__pycache__/test_preview_hub.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_see_screen.cpython-312.pyc and b/tests/__pycache__/test_see_screen.cpython-312.pyc differ
+Binary files a/tests/__pycache__/test_ui_screenshots.cpython-312.pyc and b/tests/__pycache__/test_ui_screenshots.cpython-312.pyc differ
+diff -ruN a/tests/test_agent_loop.py b/tests/test_agent_loop.py
+--- a/tests/test_agent_loop.py	2026-10-03 05:38:08.000000000 +0000
++++ b/tests/test_agent_loop.py	2026-10-03 06:53:08.315018615 +0000
+@@ -1,9 +1,10 @@
+ """Behaviour of the agent pack's one-command loop (tool/agent_loop.py).
+ 
+ The refusals matter more than the happy path: the tool exists so an agent
+-cannot push a guess, cannot pile "fix ci" commits on a branch, and cannot
+-commit a keystore by accident. Each refusal is checked in a throw-away git
+-repository with a local bare remote - no network, no GitHub, no Flutter SDK.
++cannot push a guess and cannot commit a keystore by accident. Work lands on
++`main` directly (no branch, no PR) and the loop does not wait for CI, which is
++manual here. Each behaviour is checked in a throw-away git repository with a
++local bare remote - no network, no GitHub, no Flutter SDK.
+ 
+ No third-party modules.
+ """
+@@ -54,20 +55,28 @@
+     def branch(self, name: str) -> None:
+         self.git("checkout", "-q", "-b", name)
+ 
+-    # -- refusals ----------------------------------------------------------
+-    def test_refuses_to_commit_on_the_default_branch(self) -> None:
++    # -- the default branch is where work lands ----------------------------
++    def test_commits_on_main_by_default(self) -> None:
++        """No branch, no pull request: the default branch is the target."""
+         (self.repo / "x.txt").write_text("x\n", encoding="utf-8")
+-        result = self.run_loop("-m", "feat: x")
+-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+-        self.assertIn("default branch", result.stderr)
+-        self.assertEqual(self.commits(), ["chore: initial"])
+-
+-    def test_allows_the_default_branch_only_with_the_flag(self) -> None:
+-        (self.repo / "x.txt").write_text("x\n", encoding="utf-8")
+-        result = self.run_loop("-m", "feat: x", "--allow-main", "--no-push")
++        result = self.run_loop("-m", "feat: x", "--no-push")
+         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+         self.assertEqual(self.commits()[0], "feat: x")
+ 
++    def test_pushes_to_main_without_waiting_for_ci(self) -> None:
++        """A push starts no CI here, so the loop must return without watching."""
++        self.git("remote", "add", "origin", str(self.remote))
++        (self.repo / "README.md").write_text("demo, edited\n", encoding="utf-8")
++        result = self.run_loop("-m", "docs: edit the readme", "--no-preflight")
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn("Pushed", result.stdout)
++        self.assertIn("CI not watched", result.stdout)
++        remote_log = subprocess.run(
++            ["git", "--git-dir", str(self.remote), "log", "--pretty=%s",
++             "refs/heads/main"],
++            text=True, capture_output=True, check=True).stdout.splitlines()
++        self.assertEqual(remote_log[0], "docs: edit the readme")
++
+     def test_refuses_credential_looking_files_before_committing(self) -> None:
+         self.branch("feat/secrets")
+         (self.repo / ".env").write_text("TOKEN=abc\n", encoding="utf-8")
+diff -ruN a/tests/test_ci_speedups.py b/tests/test_ci_speedups.py
+--- a/tests/test_ci_speedups.py	2026-10-03 05:38:08.000000000 +0000
++++ b/tests/test_ci_speedups.py	2026-10-03 07:00:15.346635309 +0000
+@@ -1,14 +1,15 @@
+-"""One push must not validate the same commit twice.
++"""CI runs only when a human asks for it.
+ 
+-A feature branch with an open pull request used to start the caller's CI twice
+-(the `push` and `pull_request` events build different concurrency groups) and
+-the web-preview lane - which is serialised on purpose - queued a second deploy
+-behind the first. These checks pin the behaviour that stops that:
+-
+-  * the caller's push trigger is main-only, so a PR branch runs one event;
+-  * drafts are skipped entirely (the reusable workflow's `skip-draft-prs`);
+-  * prose-only changes (`**.md`, `docs/**`, `distribution/**`) start nothing;
+-  * the installer, the examples and the reusable workflow agree on all three.
++The caller templates used to validate every push and pull request, which meant a
++CI run for every small edit. They are now manual-only: nothing runs on push or
++pull_request, and the work lands on `main` in batches. These checks pin that:
++
++  * the caller's `on:` block is `workflow_dispatch` and nothing else;
++  * the installer's generated caller and the example agree on it;
++  * the draft guard is gone from the caller (there is no pull_request event).
++
++The reusable `flutter-build.yml` still carries the `skip-draft-prs` guard, so a
++caller that chooses to use pull requests keeps the old behaviour.
+ 
+ No Flutter SDK, no network, no third-party modules.
+ """
+@@ -30,6 +31,8 @@
+ 
+ 
+ class ReusableWorkflowTests(unittest.TestCase):
++    """The shared workflow keeps the draft-PR guard for callers that use PRs."""
++
+     def setUp(self) -> None:
+         self.text = BUILD.read_text(encoding="utf-8")
+ 
+@@ -56,40 +59,57 @@
+ 
+ 
+ class GeneratedCallerTests(unittest.TestCase):
+-    """The installer's payload and the examples must stay in step."""
++    """The installer's payload and the examples must stay in step: manual-only."""
+ 
+     def setUp(self) -> None:
+         self.installer = INSTALLER.read_text(encoding="utf-8")
+ 
+-    def assert_main_only_push(self, text: str, where: str) -> None:
+-        self.assertIn("  push:\n    branches: [main]\n", text,
+-                      f"{where}: push is not restricted to main")
+-        self.assertIn("  pull_request:", text,
+-                      f"{where}: pull_request trigger disappeared")
+-
+-    def test_installer_generated_callers_are_main_only(self) -> None:
+-        self.assert_main_only_push(self.installer, "install.sh")
+-
+-    def test_examples_are_main_only(self) -> None:
+-        self.assert_main_only_push(EXAMPLE_CI.read_text(encoding="utf-8"), "example ci.yml")
+-        self.assert_main_only_push(EXAMPLE_PREVIEW.read_text(encoding="utf-8"),
+-                                   "example web-preview.yml")
+-
+-    def test_every_caller_ignores_prose_only_changes(self) -> None:
+-        for path in (INSTALLER, EXAMPLE_CI, EXAMPLE_PREVIEW):
+-            text = path.read_text(encoding="utf-8")
+-            self.assertIn("paths-ignore:", text, str(path))
+-            for pattern in ('"**.md"', '"docs/**"', '"distribution/**"'):
+-                self.assertIn(pattern, text, f"{path} misses {pattern}")
+-
+-    def test_the_ci_caller_skips_drafts(self) -> None:
+-        self.assertIn(GUARD, EXAMPLE_CI.read_text(encoding="utf-8"))
+-        self.assertIn(GUARD, self.installer)
++    def ci_block(self, text: str) -> str:
++        """The generated ci.yml heredoc inside the installer."""
++        match = re.search(
++            r"<<'YAML'\n(name: Flutter CI — Format, Analyze & Test\n.*?)\nYAML\n",
++            text, re.S)
++        self.assertIsNotNone(match, "ci.yml block not found in install.sh")
++        return match.group(1)
++
++    def assert_manual_only(self, text: str, where: str) -> None:
++        self.assertIn("on:\n  workflow_dispatch:\n", text,
++                      f"{where}: expected a manual-only trigger")
++        self.assertNotIn("  push:", text, f"{where}: a push trigger is back")
++        self.assertNotIn("  pull_request:", text,
++                         f"{where}: a pull_request trigger is back")
++
++    def test_installer_generated_ci_is_manual_only(self) -> None:
++        self.assert_manual_only(self.ci_block(self.installer),
++                                "install.sh ci.yml")
++
++    def test_example_ci_is_manual_only(self) -> None:
++        self.assert_manual_only(EXAMPLE_CI.read_text(encoding="utf-8"),
++                                "example ci.yml")
++
++    def test_the_ci_caller_no_longer_needs_the_draft_guard(self) -> None:
++        self.assertNotIn(GUARD, self.ci_block(self.installer))
++        self.assertNotIn(GUARD, EXAMPLE_CI.read_text(encoding="utf-8"))
++
++    def preview_block(self, text: str) -> str:
++        """The generated web-preview.yml heredoc inside the installer."""
++        match = re.search(
++            r"<<'YAML'\n(name: Deploy Flutter Web Preview \(GitHub Pages\)\n.*?)\nYAML\n",
++            text, re.S)
++        self.assertIsNotNone(match, "web-preview block not found in install.sh")
++        return match.group(1)
++
++    def test_installer_generated_web_preview_is_manual_only(self) -> None:
++        block = self.preview_block(self.installer)
++        self.assertIn("on:\n  workflow_dispatch:\n  delete:\n", block)
++        self.assertNotIn("  push:", block)
++        self.assertNotIn("  pull_request:", block)
+ 
+-    def test_the_preview_caller_keeps_the_delete_cleanup(self) -> None:
++    def test_the_web_preview_example_keeps_cleanup_and_is_manual_only(self) -> None:
+         text = EXAMPLE_PREVIEW.read_text(encoding="utf-8")
+-        self.assertIn("  delete:", text)
+-        self.assertIn("github.event.ref_type == 'branch'", text)
++        self.assertIn("on:\n  workflow_dispatch:\n  delete:\n", text)
++        self.assertNotIn("  push:", text)
++        self.assertNotIn("  pull_request:", text)
+ 
+ 
+ if __name__ == "__main__":
+diff -ruN a/tests/test_ui_screenshots.py b/tests/test_ui_screenshots.py
+--- a/tests/test_ui_screenshots.py	2026-10-03 05:38:08.000000000 +0000
++++ b/tests/test_ui_screenshots.py	2026-10-03 07:00:17.416691613 +0000
+@@ -280,8 +280,11 @@
+         self.assertIn("contents: write", self.text)
+         self.assertIn("pull-requests: write", self.text)
+ 
+-    def test_skips_draft_pull_requests(self) -> None:
+-        self.assertIn("github.event.pull_request.draft == false", self.text)
++    def test_is_manual_only(self) -> None:
++        """No push or pull_request trigger: the caller runs on demand only."""
++        self.assertIn("on:\n  workflow_dispatch:", self.text)
++        self.assertNotIn("  pull_request:", self.text)
++        self.assertNotIn("  push:", self.text)
+ 
+     def test_pins_a_release_that_contains_the_workflow(self) -> None:
+         match = re.search(r"ui-screenshots\.yml@(v[\d.]+)", self.text)
+@@ -409,25 +412,16 @@
+ 
+ 
+ class SmokeWorkflowTriggerTests(unittest.TestCase):
+-    """A fix that does not re-run the smoke test is a fix nobody verified.
++    """`flutter-smoke-test.yml` is manual now (plus a weekly cron).
+ 
+-    `flutter-smoke-test.yml` is the only place the screenshot pipeline runs
+-    end to end. The workflow used to list just the workflow files under
+-    `paths:`, so a commit that only changed `scripts/capture-pages.cjs` - the
+-    headless-browser flags, of all things - did not start the workflow at all.
+-    The pull request stayed red for an older reason and the fix looked
+-    untested. Every repository file the workflow reads must therefore appear
+-    in both `paths:` lists.
++    With no push or pull_request trigger there is no path filter to keep in
++    step; what still matters is that the workflow actually exercises the shipped
++    screenshot scripts, so the screenshots job must reach capture-pages.cjs
++    through capture-screenshots.sh.
+     """
+ 
+     WORKFLOW_REFS = re.compile(r"(?:scripts|tests|agent-pack)/[A-Za-z0-9_.-]+")
+ 
+-    def event_paths(self, text: str, event: str) -> list[str]:
+-        block = re.search(
+-            rf"(?ms)^  {event}:\n(.*?)(?=^  [a-z_]+:|^[a-z])", text)
+-        self.assertIsNotNone(block, f"no {event}: block in the smoke workflow")
+-        return re.findall(r"(?m)^      - (\S+)$", block.group(1))
+-
+     def screenshot_job(self, text: str) -> str:
+         """The screenshots job only - the build job's install step is covered
+         by installer-tests.yml, and re-running a Flutter web build for every
+@@ -471,17 +465,17 @@
+                 todo.append(f"scripts/{sibling}")
+         return found
+ 
+-    def test_every_referenced_repository_file_triggers_the_workflow(self) -> None:
++    def test_the_workflow_is_manual_only(self) -> None:
++        text = SMOKE.read_text(encoding="utf-8")
++        self.assertIn("  workflow_dispatch:", text)
++        self.assertNotIn("  push:", text)
++        self.assertNotIn("  pull_request:", text)
++
++    def test_the_screenshots_job_reaches_the_capture_script(self) -> None:
+         text = SMOKE.read_text(encoding="utf-8")
+         referenced = self.referenced_files(self.screenshot_job(text))
+         self.assertIn("scripts/capture-pages.cjs", referenced)
+ 
+-    def test_the_capture_flag_fix_is_covered(self) -> None:
+-        """The concrete regression: the locale/WebGL fix lives in the .cjs."""
+-        for event in ("push", "pull_request"):
+-            listed = self.event_paths(SMOKE.read_text(encoding="utf-8"), event)
+-            self.assertIn("scripts/capture-pages.cjs", listed, event)
+-
+ 
+ if __name__ == "__main__":
+     unittest.main()

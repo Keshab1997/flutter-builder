@@ -6,10 +6,10 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 
 | Workflow file | GitHub Actions-এ দেখানো নাম | কখন চলে / কী করে |
 |---|---|---|
-| `ci.yml` | **Flutter CI — Format, Analyze & Test** | Push, pull request ও manual run-এ Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
+| `ci.yml` | **Flutter CI — Format, Analyze & Test** | শুধু manual run-এ (Actions → Run workflow) Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
 | `manual-build.yml` | **Build Android APK or AAB (Manual)** | Actions থেকে বেছে নিলে APK অথবা AAB build করে artifact দেয়। |
 | `publish-release.yml` | **Publish Signed Android Release** | একবার signed APK/AAB build করে GitHub Release প্রকাশ করে; চাইলে একই AAB Google Play Internal testing-এ upload ও Play release notes পাঠায়। |
-| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Push/PR-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
+| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Manual run-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
 
 
 ## দ্রুত setup (প্রস্তাবিত)
@@ -61,7 +61,7 @@ for d in ~/projects/*/; do (cd "$d" && bash /tmp/bump-ref.sh); done            #
 
 ## Agent pack (v1.9.0+) — agent-দের কাজ দ্রুত করার জন্য
 
-AI agent দিয়ে কাজ করালে সময় নষ্ট হয় দুটো জায়গায়: push করার **আগে** ভুল ধরা পড়ে না, আর push-এর **পরে** CI-র ফল জানতে বারবার হাতে চেক করতে হয়। এই pack দুটোই কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
+AI agent দিয়ে কাজ করালে সময় নষ্ট হয় push করার **আগে** ভুল ধরা না পড়ায়। এই pack সেটা কমায় — Flutter SDK লাগে না, শুধু python3 (≥3.8):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.12.1/scripts/install-agent-pack.sh | bash
@@ -73,33 +73,31 @@ Repository root-এ যা বসে:
 |---|---|
 | `tool/preflight.py` | Dart code-এ অব্যবহৃত private widget/function, অব্যবহৃত optional constructor parameter, অব্যবহৃত import, `print()` ছোঁয়া (avoid_print), একবারও ব্যবহার না হওয়া private field, orphan ফাইল ও একই নামের দুটো class একসাথে import — সব খুঁজে বের করে। খরচ ১ সেকেন্ড (SDK ছাড়া), অথচ ঠিক এই ভুলগুলোই push-কে লাল করে |
 | `tool/ci_watch.py` | commit-এর GitHub Actions run-গুলো নিজে থেকে watch করে; শেষ হলে প্রতিটা workflow-র ফল আর fail করা job-এর আসল error লাইন ছাপায় (token: `--token-file`, `$GITHUB_TOKEN`/`$GH_TOKEN`, বা `gh auth token`) |
-| `tool/agent_loop.py` | এক command-এ পুরো loop: preflight → secret guard → commit → push → CI watch। main-এ commit করা বা credential-এর মতো ফাইল (`keystore`, `.env`, `google-services.json`) stage করা **আগেই আটকে দেয়**, তাই agent ভুল করে একটা ধাপও বাদ দিতে পারে না |
-| `AGENTS.md` | agent-দের playbook: এক change = এক push loop, CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
+| `tool/agent_loop.py` | এক command-এ পুরো loop: preflight → secret guard → commit → push — সরাসরি `main`-এ, কোনো branch বা PR ছাড়া। credential-এর মতো ফাইল (`keystore`, `.env`, `google-services.json`) stage করা **আগেই আটকে দেয়**, তাই agent ভুল করে একটা ধাপও বাদ দিতে পারে না; CI এখানে manual, তাই push-এর পরে অপেক্ষা করে না |
+| `AGENTS.md` | agent-দের playbook: batch loop (অনেক ছোট change → একবার CI), CI map, CI log সস্তায় পড়া, secrets নিয়ম, আর কখন human-কে থামতে হবে |
 
 ```bash
 python3 tool/preflight.py                                   # push-এর আগে, ১ সেকেন্ড
 python3 tool/agent_loop.py -m "fix(profile): guard a null avatar"
 python3 tool/agent_loop.py -m "..." --amend                 # আগের commit ঠিক করা
-python3 tool/agent_loop.py -m "..." --draft-pr              # branch + draft PR (draft-এ CI চলে না)
-python3 tool/agent_loop.py -m "..." --ready                 # draft প্রস্তুত → CI শুরু
-python3 tool/agent_loop.py -m "..." --no-watch              # শুধু push
+python3 tool/agent_loop.py -m "..." --no-push               # শুধু commit
+python3 tool/agent_loop.py -m "..." --watch                 # কোনো run ইতিমধ্যে চললে তার জন্য অপেক্ষা
 ```
 
-Exit code: `0` = push হয়েছে (আর watched হলে সব সবুজ), `1` = CI লাল বা push fail, `2` = কিছু বদলানোর আগেই আটকে দিয়েছে। `--amend` করলে push হয় `--force-with-lease` দিয়ে — কখনো খালি `--force` নয়।
+Exit code: `0` = commit/push হয়েছে, `1` = push fail, `2` = কিছু বদলানোর আগেই আটকে দিয়েছে। `--amend` করলে push হয় `--force-with-lease` দিয়ে — কখনো খালি `--force` নয়।
 
 
 `AGENTS.md` সবসময় **merge** হয়, replace নয়: `flutter-builder:agent-pack:start/end` marker-এর ভিতরের অংশটুকু update হয়, বাইরের সব লাইন (আপনার নিজের project notes) অপরিবর্তিত থাকে; ফাইল না থাকলে নতুন করে তৈরি হয়। Options: `--dry-run`, `--force`, `--help`।
 
-### push-প্রতি duplicate run বন্ধ (নতুন caller templates)
+### CI এখন manual — batch করে একবার চালান
 
-একই commit আগে দুইবার validate হত: `push` আর `pull_request` আলাদা concurrency group-এ চলত, আর web preview lane (যা ইচ্ছাকৃতভাবে serialized) একটা আরেকটার পিছনে queue-তে দাঁড়াত। নতুন caller আর shared workflow-তে:
+CI আর কোনো push বা pull request-এ নিজে থেকে চলে না। ছোট ছোট পরিবর্তন জমিয়ে, কাজ শেষ হলে **Actions → Flutter CI — Format, Analyze & Test → Run workflow** দিয়ে একবার চালান — তাতে প্রতি ছোট edit-এ একটা run খরচ হয় না।
 
-- `push:` শুধু `main`-এ — feature branch-এর কাজ `pull_request` event থেকেই হয় (এক run, দুটো নয়)
-- **draft PR**-এ CI চলে না; *Ready for review* করলেই শুরু
-- শুধু লেখা/মেটাডেটা বদলালে (`**.md`, `docs/**`, `distribution/**`) কিছুই চলে না
-- shared `flutter-build.yml`-এ নতুন input `skip-draft-prs` (default `true`) — চাইলে caller থেকে বন্ধ করা যায়
+- caller-এর `on:`-এ শুধু `workflow_dispatch:` থাকে — `push`/`pull_request` নেই
+- agent সরাসরি `main`-এ push করে; কোনো feature branch বা pull request লাগে না
+- CI চালানোর দায়িত্ব human-এর; agent শুধু `preflight.py` চালিয়ে নিশ্চিত হয়
 
-আগে install করা project-এ এই আচরণ চাইলে caller-এর `on:`/`if:` অংশ hand-merge করুন বা `install.sh --force` (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
+আগে install করা project-এ এই আচরণ চাইলে `install.sh --force` চালান (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
 
 ## CI আরও দ্রুত — build cache (v1.10+)
 
@@ -165,7 +163,7 @@ jobs:
 
 ## Build ও release
 
-- **CI**: format, analyze ও tests চালায়—সাধারণত pull request review-এর জন্য।
+- **CI**: format, analyze ও tests চালায়—এখন শুধু manual run-এ (Actions → Run workflow), batch করে একবার।
 - **Manual APK**: ফোনে install করে পরীক্ষা করার artifact। Actions → **Build Android APK or AAB (Manual)** → Run workflow → `apk` বাছুন।
 - **Manual AAB**: Play Store-এ upload করার Android App Bundle। একই workflow-তে `aab` বাছুন।
 - **Publish release**: Actions → **Publish Signed Android Release** → Run workflow। এটি version/tag ও GitHub Release প্রকাশ করে, তাই আগে `pubspec.yaml`-এ version বাড়ান।
@@ -195,7 +193,7 @@ version: 1.2.3+4
 
 ### Web preview (optional)
 
-`web-preview.yml` push/PR-এ Flutter web build deploy করে। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়।
+`web-preview.yml` এখন manual — Actions → **Deploy Flutter Web Preview (GitHub Pages)** → Run workflow দিলে Flutter web build deploy হয় (push/PR-এ নিজে থেকে চলে না)। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়।
 
 **সব preview এক জায়গায় (preview hub, v1.10+):** প্রতিটা deploy-এর পরে `…/<repo>/preview/` পেজটা নিজে থেকে আপডেট হয় — ওখানে সব branch-এর preview একসাথে লিস্ট হয়ে থাকে, তাই Actions run summary খোঁজার দরকার নেই:
 

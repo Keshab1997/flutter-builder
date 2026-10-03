@@ -1,8 +1,11 @@
 name: Deploy Flutter Web Preview (GitHub Pages)
 
-# Builds the app for the web on pull requests and on main, and publishes it to
-# GitHub Pages under preview/<branch>, so you can test the app by opening a URL
-# in a browser instead of downloading and installing an APK.
+# Builds the app for the web and publishes it to GitHub Pages under
+# preview/<branch>, so you can test the app by opening a URL in a browser
+# instead of downloading and installing an APK.
+#
+# Manual only: run it from Actions -> Run workflow when you want a fresh
+# preview; nothing runs on a push or pull request.
 #
 # One-time setup: Settings -> Pages -> Deploy from a branch -> gh-pages (root).
 # The first run creates the gh-pages branch.
@@ -11,19 +14,9 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 # `delete` event, so gh-pages does not keep a web bundle for every dead branch.
 # GitHub runs delete-triggered workflows from the default branch, so merge this
 # file before relying on that.
-#
-# The push trigger is main-only on purpose: a branch with an open pull request
-# already builds through the pull_request event, and running both fired two
-# deploys for one push against the shared gh-pages branch.
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "distribution/**"
-  pull_request:
+  workflow_dispatch:
   delete:
 
 permissions:

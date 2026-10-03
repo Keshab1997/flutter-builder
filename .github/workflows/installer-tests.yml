@@ -1,18 +1,7 @@
 name: Test one-command installer
+# Manual only: no push or pull_request trigger. Run it from Actions -> Run
+# workflow when you have changed scripts/, the agent pack, or the tests.
 on:
-  push:
-    branches: [main]
-    paths:
-      - scripts/**
-      - tests/**
-      - agent-pack/**
-      - .github/workflows/installer-tests.yml
-  pull_request:
-    paths:
-      - scripts/**
-      - tests/**
-      - agent-pack/**
-      - .github/workflows/installer-tests.yml
   workflow_dispatch:
 
 permissions:

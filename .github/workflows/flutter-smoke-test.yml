@@ -14,39 +14,12 @@ name: Flutter smoke test
 # gradle/actions/setup-gradle (or to the runner image it expects) should fail
 # here, not inside a user's app repository.
 
+# Manual only: no push or pull_request trigger. Run it from Actions -> Flutter
+# smoke test -> Run workflow when you want it. The weekly schedule below is kept
+# because it is not tied to a push: it catches upstream Flutter / Gradle /
+# runner-image breakage before callers hit it.
 on:
-  push:
-    branches: [main]
-    paths:
-      # Everything the smoke test exercises, not just the workflow files: the
-      # screenshots job runs the shipped scripts, so a fix inside
-      # capture-pages.cjs (the headless-browser flags, for instance) must
-      # re-run this workflow instead of silently skipping it.
-      - .github/workflows/flutter-build.yml
-      - .github/workflows/flutter-smoke-test.yml
-      - .github/workflows/preview-cleanup.yml
-      - .github/workflows/publish-release.yml
-      - .github/workflows/ui-screenshots.yml
-      - .github/workflows/web-preview.yml
-      - scripts/capture-screenshots.sh
-      - scripts/capture-pages.cjs
-      - scripts/embed-screenshots.sh
-      - tests/test_ui_screenshots.py
-  pull_request:
-    paths:
-      - .github/workflows/flutter-build.yml
-      - .github/workflows/flutter-smoke-test.yml
-      - .github/workflows/preview-cleanup.yml
-      - .github/workflows/publish-release.yml
-      - .github/workflows/ui-screenshots.yml
-      - .github/workflows/web-preview.yml
-      - scripts/capture-screenshots.sh
-      - scripts/capture-pages.cjs
-      - scripts/embed-screenshots.sh
-      - tests/test_ui_screenshots.py
   schedule:
-    # Weekly, even when nothing changes here: catches upstream Flutter /
-    # Gradle / runner-image breakage before callers hit it.
     - cron: "0 6 * * 0"
   workflow_dispatch:
     inputs:

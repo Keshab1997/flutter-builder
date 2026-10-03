@@ -1,9 +1,10 @@
 """Behaviour of the agent pack's one-command loop (tool/agent_loop.py).
 
 The refusals matter more than the happy path: the tool exists so an agent
-cannot push a guess, cannot pile "fix ci" commits on a branch, and cannot
-commit a keystore by accident. Each refusal is checked in a throw-away git
-repository with a local bare remote - no network, no GitHub, no Flutter SDK.
+cannot push a guess and cannot commit a keystore by accident. Work lands on
+`main` directly (no branch, no PR) and the loop does not wait for CI, which is
+manual here. Each behaviour is checked in a throw-away git repository with a
+local bare remote - no network, no GitHub, no Flutter SDK.
 
 No third-party modules.
 """
@@ -54,19 +55,27 @@ class AgentLoopTests(unittest.TestCase):
     def branch(self, name: str) -> None:
         self.git("checkout", "-q", "-b", name)
 
-    # -- refusals ----------------------------------------------------------
-    def test_refuses_to_commit_on_the_default_branch(self) -> None:
+    # -- the default branch is where work lands ----------------------------
+    def test_commits_on_main_by_default(self) -> None:
+        """No branch, no pull request: the default branch is the target."""
         (self.repo / "x.txt").write_text("x\n", encoding="utf-8")
-        result = self.run_loop("-m", "feat: x")
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn("default branch", result.stderr)
-        self.assertEqual(self.commits(), ["chore: initial"])
-
-    def test_allows_the_default_branch_only_with_the_flag(self) -> None:
-        (self.repo / "x.txt").write_text("x\n", encoding="utf-8")
-        result = self.run_loop("-m", "feat: x", "--allow-main", "--no-push")
+        result = self.run_loop("-m", "feat: x", "--no-push")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.commits()[0], "feat: x")
+
+    def test_pushes_to_main_without_waiting_for_ci(self) -> None:
+        """A push starts no CI here, so the loop must return without watching."""
+        self.git("remote", "add", "origin", str(self.remote))
+        (self.repo / "README.md").write_text("demo, edited\n", encoding="utf-8")
+        result = self.run_loop("-m", "docs: edit the readme", "--no-preflight")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Pushed", result.stdout)
+        self.assertIn("CI not watched", result.stdout)
+        remote_log = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "log", "--pretty=%s",
+             "refs/heads/main"],
+            text=True, capture_output=True, check=True).stdout.splitlines()
+        self.assertEqual(remote_log[0], "docs: edit the readme")
 
     def test_refuses_credential_looking_files_before_committing(self) -> None:
         self.branch("feat/secrets")

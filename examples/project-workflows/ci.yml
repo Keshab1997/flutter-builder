@@ -1,16 +1,9 @@
 name: Flutter CI — Format, Analyze & Test
 
-# Validates every pull request; on main it validates the merge result.
+# Manual only: nothing runs on push or pull request. Batch your changes, then
+# run this once from Actions -> Flutter CI — Format, Analyze & Test -> Run
+# workflow. That keeps small edits from spending a CI run each.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-    # Prose and store metadata cannot change a Dart build: skip the run.
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "distribution/**"
   workflow_dispatch:
 
 permissions:
@@ -22,9 +15,6 @@ concurrency:
 
 jobs:
   ci:
-    # A draft pull request is a scratchpad: CI starts when it is marked ready
-    # for review, so iterating costs no runs at all.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.12.1
     with:
       flutter-channel: stable
