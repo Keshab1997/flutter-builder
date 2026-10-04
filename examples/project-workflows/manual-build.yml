@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.1
     with:
       flutter-channel: stable
       build-apk: ${{ inputs.format == 'apk' }}
@@ -28,3 +28,5 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      # Optional for apps using ImgBB; extractable from the built APK/AAB.
+      IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}

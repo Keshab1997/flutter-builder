@@ -20,7 +20,11 @@ with the standard library only, no PyYAML, no Flutter SDK and no network.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -154,6 +158,102 @@ class PinDriftTests(unittest.TestCase):
         self.assertIsNotNone(pinned, "the builder checkout has no tag pin")
         self.assertEqual(pinned.group(1), packed.group(1),
                          "flutter-build.yml and install-agent-pack.sh pins differ")
+
+
+class ImgBbWorkflowSecretTests(unittest.TestCase):
+    """The optional API key reaches only Android builds and leaves no workspace file."""
+
+    BUILD = ROOT / ".github" / "workflows" / "flutter-build.yml"
+    PUBLISH = ROOT / ".github" / "workflows" / "publish-release.yml"
+    MANUAL_EXAMPLE = ROOT / "examples" / "project-workflows" / "manual-build.yml"
+
+    def setUp(self) -> None:
+        self.workflow = self.BUILD.read_text(encoding="utf-8")
+
+    @staticmethod
+    def run_block(body: str) -> str:
+        match = re.search(r"^        run: \|\n((?:          .*\n|\n)+)", body, re.M)
+        if match is None:
+            raise AssertionError("step has no run block")
+        return textwrap.dedent(match.group(1))
+
+    def run_step(self, name: str, root: Path, key: str) -> subprocess.CompletedProcess[str]:
+        runner_temp = root / "runner-temp"
+        runner_temp.mkdir(exist_ok=True)
+        env = dict(os.environ)
+        env.update(RUNNER_TEMP=str(runner_temp), IMGBB_API_KEY=key)
+        script = self.run_block(step(self.workflow, name))
+        return subprocess.run(
+            ["bash", "-c", script], cwd=root, env=env,
+            text=True, capture_output=True, check=False,
+        )
+
+    def test_secret_is_optional_and_injected_only_for_android_builds(self) -> None:
+        secret_section = self.workflow.split("    secrets:\n", 1)[1].split("\njobs:\n", 1)[0]
+        self.assertIn("      IMGBB_API_KEY:", secret_section)
+        self.assertIn("        required: false", secret_section)
+        inject = step(self.workflow, "Inject ImgBB API key for Android build")
+        self.assertIn("if: inputs.build-apk || inputs.build-aab", inject)
+        self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", inject)
+        self.assertIn("path.write_text", inject)
+
+    def test_injection_preserves_existing_settings_and_cleanup_restores_them(self) -> None:
+        key = "test-imgbb-key-never-log"
+        original = "# local config\nOTHER_SETTING=keep\nIMGBB_API_KEY=old-value\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dotenv = root / ".env"
+            dotenv.write_text(original, encoding="utf-8")
+
+            injected = self.run_step("Inject ImgBB API key for Android build", root, key)
+            self.assertEqual(injected.returncode, 0, injected.stdout + injected.stderr)
+            contents = dotenv.read_text(encoding="utf-8")
+            self.assertIn("OTHER_SETTING=keep", contents)
+            self.assertEqual(contents.count("IMGBB_API_KEY="), 1)
+            self.assertIn(f"IMGBB_API_KEY={key}", contents)
+            self.assertNotIn(key, injected.stdout + injected.stderr)
+
+            restored = self.run_step("Restore .env after Android build", root, key)
+            self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+            self.assertEqual(dotenv.read_text(encoding="utf-8"), original)
+            self.assertNotIn(key, restored.stdout + restored.stderr)
+
+    def test_cleanup_removes_a_temporary_env_file_created_for_the_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            injected = self.run_step("Inject ImgBB API key for Android build", root, "test-key")
+            self.assertEqual(injected.returncode, 0, injected.stdout + injected.stderr)
+            self.assertTrue((root / ".env").is_file())
+
+            restored = self.run_step("Restore .env after Android build", root, "test-key")
+            self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+            self.assertFalse((root / ".env").exists())
+
+    def test_missing_key_does_not_change_the_app_env(self) -> None:
+        original = "OTHER_SETTING=keep\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dotenv = root / ".env"
+            dotenv.write_text(original, encoding="utf-8")
+
+            result = self.run_step("Inject ImgBB API key for Android build", root, "")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(dotenv.read_text(encoding="utf-8"), original)
+            self.assertIn("IMGBB_API_KEY is not configured", result.stdout)
+            self.assertNotIn("test-key", result.stdout + result.stderr)
+
+    def test_release_wrapper_and_manual_example_forward_the_optional_secret(self) -> None:
+        publish = self.PUBLISH.read_text(encoding="utf-8")
+        self.assertIn("      IMGBB_API_KEY:", publish)
+        self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", publish)
+        self.assertIn("flutter-build.yml@v1.14.1", publish)
+        manual = self.MANUAL_EXAMPLE.read_text(encoding="utf-8")
+        self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", manual)
+
+    def test_cleanup_runs_even_when_an_android_build_fails(self) -> None:
+        cleanup = step(self.workflow, "Restore .env after Android build")
+        self.assertIn("if: always() && (inputs.build-apk || inputs.build-aab)", cleanup)
+
 
 
 if __name__ == "__main__":

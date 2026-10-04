@@ -13,7 +13,7 @@ name: Reusable Signed Android Release Publisher
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.14.0
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.14.1
 #       with:
 #         app-name: SpeakEasy
 #       secrets: inherit
@@ -255,6 +255,9 @@ on:
       GOOGLE_SERVICES_PLIST_BASE64:
         description: "iOS equivalent of GOOGLE_SERVICES_JSON_BASE64 (GoogleService-Info.plist)"
         required: false
+      IMGBB_API_KEY:
+        description: "Optional ImgBB key; embedded in APK/AAB and extractable."
+        required: false
 
 jobs:
   publish:
@@ -262,7 +265,7 @@ jobs:
     # MUST stay in step with the tag this file is published under. The
     # google-services.json injection only exists from v1.6.0 onwards, so an
     # older ref here silently releases an offline-only app.
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.0
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.1
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
@@ -316,3 +319,4 @@ jobs:
       FIREBASE_SERVICE_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_CREDENTIALS }}
       GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
       GOOGLE_SERVICES_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICES_PLIST_BASE64 }}
+      IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}

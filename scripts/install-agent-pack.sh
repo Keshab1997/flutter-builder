@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the flutter-builder agent pack into an existing Flutter repository.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.14.0/scripts/install-agent-pack.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.14.1/scripts/install-agent-pack.sh | bash
 #
 # What it installs (repository root, never touches anything else):
 #   tool/preflight.py    Dart checks that need no Flutter SDK: dead code,
@@ -41,7 +41,7 @@ tool/agent_loop.py, tool/see_screen.py and a managed AGENTS.md block) into a Flu
 No Flutter SDK needed.
 
 Run from anywhere inside the repository:
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.14.0/scripts/install-agent-pack.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.14.1/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything

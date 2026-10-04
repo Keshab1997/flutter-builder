@@ -341,6 +341,12 @@ on:
       GOOGLE_SERVICES_PLIST_BASE64:
         description: "iOS equivalent of GOOGLE_SERVICES_JSON_BASE64 (GoogleService-Info.plist)"
         required: false
+      IMGBB_API_KEY:
+        description: >-
+          Optional ImgBB key. Android builds temporarily write it to .env
+          for apps that bundle that file; the key is embedded in the APK/AAB
+          and can be extracted.
+        required: false
 
 jobs:
   validate-and-build:
@@ -923,6 +929,46 @@ jobs:
           echo "--- android/gradle.properties ---"
           cat "$props"
 
+      - name: Inject ImgBB API key for Android build
+        if: inputs.build-apk || inputs.build-aab
+        env:
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+        run: |
+          set -euo pipefail
+          env_backup="$RUNNER_TEMP/flutter-builder-imgbb-env.original"
+          env_state="$RUNNER_TEMP/flutter-builder-imgbb-env.state"
+          rm -f "$env_backup" "$env_state"
+          if [ -z "${IMGBB_API_KEY:-}" ]; then
+            echo "::notice::IMGBB_API_KEY is not configured; image uploads remain disabled."
+            exit 0
+          fi
+          if [[ "$IMGBB_API_KEY" == *$'\n'* || "$IMGBB_API_KEY" == *$'\r'* ]]; then
+            echo "::error::IMGBB_API_KEY must be a single-line value."
+            exit 1
+          fi
+
+          # Preserve any app-local dotenv settings, then restore the file after
+          # the APK/AAB is built so the secret does not remain in the workspace.
+          if [ -f .env ]; then
+            cp -p .env "$env_backup"
+            printf 'present\n' > "$env_state"
+          else
+            printf 'absent\n' > "$env_state"
+          fi
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+
+          key = os.environ["IMGBB_API_KEY"]
+          path = Path(".env")
+          lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+          lines = [line for line in lines if line.partition("=")[0].strip() != "IMGBB_API_KEY"]
+          lines.append(f"IMGBB_API_KEY={key}")
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          path.chmod(0o600)
+          print("ImgBB key injected into the .env asset for this Android build (value not logged).")
+          PYTHON
+
       - name: Build release APK
         if: inputs.build-apk
         env:
@@ -986,6 +1032,27 @@ jobs:
           test -f build/app/outputs/bundle/release/app-release.aab || (
             cd android && ./gradlew bundleRelease ${GRADLE_DART_DEFINES:+"-Pdart-defines=$GRADLE_DART_DEFINES"}
           )
+
+      - name: Restore .env after Android build
+        if: always() && (inputs.build-apk || inputs.build-aab)
+        run: |
+          set -euo pipefail
+          env_backup="$RUNNER_TEMP/flutter-builder-imgbb-env.original"
+          env_state="$RUNNER_TEMP/flutter-builder-imgbb-env.state"
+          if [ ! -f "$env_state" ]; then
+            echo "No temporary ImgBB key was injected."
+            exit 0
+          fi
+          case "$(cat "$env_state")" in
+            present) cp -p "$env_backup" .env ;;
+            absent) rm -f .env ;;
+            *)
+              echo "::error::Unknown .env restore state."
+              exit 1
+              ;;
+          esac
+          rm -f "$env_backup" "$env_state"
+          echo "Restored the original .env after Android build."
 
       - name: Check artifact size limit
         if: inputs.build-apk || inputs.build-aab

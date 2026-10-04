@@ -74,6 +74,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(f"@{PIN}", content)
             self.assertIn('working-directory: "."', content)
         self.assertIn("code-coverage: true", before["ci.yml"])
+        self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", before["manual-build.yml"])
         self.assertIn("secrets: inherit", before["publish-release.yml"])
         self.assertNotIn("app-name:", before["publish-release.yml"])
         self.assertIn(f"publish-release.yml@{PIN}", before["publish-release.yml"])

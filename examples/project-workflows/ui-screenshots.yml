@@ -54,7 +54,7 @@ jobs:
   ui:
     # v1.14.0 is the first release that ships this workflow (older tags do not
     # contain the file). Move this pin forward with scripts/bump-ref.sh.
-    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.14.0
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.14.1
     with:
       flutter-channel: stable
       # List the screens this app actually has. `/` is the home screen; for
