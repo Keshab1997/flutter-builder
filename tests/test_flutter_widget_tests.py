@@ -94,7 +94,10 @@ class ExampleWorkflowTests(unittest.TestCase):
         self.assertRegex(header, r"(?m)^  workflow_dispatch:")
         self.assertNotIn("pull_request:", header)
         self.assertNotIn("push:", header)
-        self.assertIn("uses: ./.github/workflows/flutter-widget-tests.yml", self.text)
+        self.assertIn(
+            "uses: Keshab1997/flutter-builder/.github/workflows/flutter-widget-tests.yml@v1.15.0",
+            self.text,
+        )
 
     def test_forwards_debug_run_inputs(self) -> None:
         for expression in (
@@ -105,7 +108,7 @@ class ExampleWorkflowTests(unittest.TestCase):
             "inputs['test-concurrency']",
         ):
             self.assertIn(expression, self.text)
-        self.assertIn("Copy this file and .github/workflows/flutter-widget-tests.yml", self.text)
+        self.assertIn("Copy this file into the app repository's .github/workflows/ directory.", self.text)
 
     def test_readme_explains_screen_specific_tests(self) -> None:
         text = README.read_text(encoding="utf-8")

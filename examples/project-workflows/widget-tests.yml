@@ -1,7 +1,7 @@
 name: Flutter widget-test diagnostics
 
-# Copy this file and .github/workflows/flutter-widget-tests.yml into the app
-# repository's .github/workflows/ directory. Then run it from Actions when you
+# Copy this file into the app repository's .github/workflows/ directory.
+# It calls the reusable runner pinned to v1.15.0. Run it from Actions when you
 # want a fast debug-mode check and a copyable error report. It is manual only.
 #
 # The tests must build the screen/route being checked. For a mobile overflow,
@@ -57,8 +57,8 @@ concurrency:
 
 jobs:
   widget-tests:
-    # This is a local reusable-workflow call: copy both files together.
-    uses: ./.github/workflows/flutter-widget-tests.yml
+    # Released runner pin; bump with scripts/bump-ref.sh on future releases.
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-widget-tests.yml@v1.15.0
     with:
       working-directory: ${{ inputs['working-directory'] || '.' }}
       flutter-channel: ${{ inputs['flutter-channel'] || 'stable' }}
