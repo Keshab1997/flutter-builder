@@ -1,0 +1,197 @@
+name: Reusable Flutter Widget Test Diagnostics
+
+# A fast debug-mode test lane for catching layout/runtime errors such as
+# RenderFlex overflows. It runs Flutter's existing widget tests (no emulator),
+# writes the full `flutter test` output to an artifact, and copies likely error
+# lines into the run summary so a human can paste them into a debugging session.
+# It can only inspect screens that the app's tests actually build and exercise.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Flutter project directory inside the caller repository
+        required: false
+        type: string
+        default: "."
+      flutter-channel:
+        description: Flutter channel (stable, beta, or master)
+        required: false
+        type: string
+        default: stable
+      test-target:
+        description: One *_test.dart file or directory containing widget tests
+        required: false
+        type: string
+        default: test
+      codegen:
+        description: Code generation to run before tests (none, build_runner, gen-l10n, both)
+        required: false
+        type: string
+        default: none
+      test-concurrency:
+        description: >-
+          Passed to `flutter test --concurrency N`; 0 keeps Flutter's default.
+        required: false
+        type: number
+        default: 0
+      artifact-retention-days:
+        description: Number of days to keep the full test log
+        required: false
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+
+jobs:
+  widget-tests:
+    name: Flutter widget tests (debug mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Check out the app
+        uses: actions/checkout@v5
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Verify the Flutter project and test target
+        env:
+          TEST_TARGET: ${{ inputs.test-target }}
+        run: |
+          set -euo pipefail
+          test -f pubspec.yaml || {
+            echo "::error::pubspec.yaml not found in $PWD; set working-directory."
+            exit 2
+          }
+          if [ -f "$TEST_TARGET" ]; then
+            case "$TEST_TARGET" in
+              *_test.dart) ;;
+              *) echo "::error::test-target file must end in _test.dart: $TEST_TARGET"; exit 2 ;;
+            esac
+          elif [ -d "$TEST_TARGET" ]; then
+            if ! find "$TEST_TARGET" -type f -name '*_test.dart' -print -quit | grep -q .; then
+              echo "::error::No *_test.dart files found under $TEST_TARGET. Add a widget test for the screen you want to inspect."
+              exit 2
+            fi
+          else
+            echo "::error::test-target does not exist: $TEST_TARGET"
+            exit 2
+          fi
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run code generation
+        if: inputs.codegen != 'none' && inputs.codegen != ''
+        env:
+          CODEGEN: ${{ inputs.codegen }}
+        run: |
+          set -euo pipefail
+          case "$CODEGEN" in
+            build_runner|both) dart run build_runner build --delete-conflicting-outputs ;;
+          esac
+          case "$CODEGEN" in
+            gen-l10n|both) flutter gen-l10n ;;
+            none) ;;
+            build_runner) ;;
+            *) echo "::error::Unsupported codegen value: $CODEGEN"; exit 2 ;;
+          esac
+
+      - name: Run widget and unit tests
+        id: widget-tests
+        env:
+          TEST_TARGET: ${{ inputs.test-target }}
+          TEST_CONCURRENCY: ${{ inputs.test-concurrency }}
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/flutter-widget-tests.log"
+          args=(--no-pub --reporter expanded)
+          if [[ "${TEST_CONCURRENCY:-0}" =~ ^[1-9][0-9]*$ ]]; then
+            args+=(--concurrency="$TEST_CONCURRENCY")
+          elif [ "${TEST_CONCURRENCY:-0}" != "0" ]; then
+            echo "::error::test-concurrency must be 0 or a positive integer."
+            exit 2
+          fi
+
+          # flutter test runs in debug mode. Keep its full output even when a
+          # test fails; PIPESTATUS preserves Flutter's exit code through tee.
+          set +e
+          flutter test "${args[@]}" "$TEST_TARGET" 2>&1 | tee "$log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Summarize diagnostics
+        if: always()
+        working-directory: ${{ github.workspace }}
+        env:
+          TEST_TARGET: ${{ inputs.test-target }}
+          TEST_EXIT_CODE: ${{ steps.widget-tests.outputs.exit_code || 'not-run' }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/flutter-widget-tests.log"
+          {
+            echo "## Flutter widget-test diagnostics"
+            echo
+            echo "- Target: \`$TEST_TARGET\`"
+            echo "- Test exit code: \`$TEST_EXIT_CODE\`"
+            echo "- Mode: Flutter test/debug (no emulator)"
+            echo
+            echo "Only screens actually built by the tests are checked. To catch a mobile overflow, set the test viewport to a phone size and pump the affected screen/route."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ ! -s "$log" ]; then
+            echo "No test log was produced; setup, dependency installation, or code generation may have failed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          pattern='RenderFlex overflowed|overflowed by|EXCEPTION CAUGHT BY RENDERING LIBRARY|Exception caught by rendering library|Unhandled exception|TestFailure|Exception:|Error:'
+          if grep -Eiq "$pattern" "$log"; then
+            {
+              echo "### Likely errors (with nearby context)"
+              echo
+              echo '```text'
+              grep -Ein -C 3 "$pattern" "$log" | head -n 120 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$TEST_EXIT_CODE" != "0" ]; then
+            {
+              echo "### Test log tail"
+              echo
+              echo '```text'
+              tail -n 80 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No common overflow/exception signatures found in the test output." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "The full raw log is attached as the \`flutter-widget-test-log\` artifact." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-widget-test-log
+          path: ${{ runner.temp }}/flutter-widget-tests.log
+          if-no-files-found: warn
+          retention-days: ${{ inputs.artifact-retention-days }}

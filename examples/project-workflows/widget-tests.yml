@@ -1,0 +1,67 @@
+name: Flutter widget-test diagnostics
+
+# Copy this file and .github/workflows/flutter-widget-tests.yml into the app
+# repository's .github/workflows/ directory. Then run it from Actions when you
+# want a fast debug-mode check and a copyable error report. It is manual only.
+#
+# The tests must build the screen/route being checked. For a mobile overflow,
+# write the widget test at a phone-sized viewport; this workflow does not launch
+# an emulator or navigate the app by itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      working-directory:
+        description: Flutter app directory (use . for the repository root)
+        required: false
+        type: string
+        default: "."
+      flutter-channel:
+        description: Flutter channel
+        required: false
+        type: choice
+        options:
+          - stable
+          - beta
+          - master
+        default: stable
+      test-target:
+        description: Test file or directory (for example test/widget_test.dart)
+        required: false
+        type: string
+        default: test
+      codegen:
+        description: Code generation required before tests
+        required: false
+        type: choice
+        options:
+          - none
+          - build_runner
+          - gen-l10n
+          - both
+        default: none
+      test-concurrency:
+        description: 0 uses Flutter's default; a positive number limits workers
+        required: false
+        type: number
+        default: 0
+
+run-name: Flutter widget tests — ${{ inputs['test-target'] || 'test' }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: widget-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  widget-tests:
+    # This is a local reusable-workflow call: copy both files together.
+    uses: ./.github/workflows/flutter-widget-tests.yml
+    with:
+      working-directory: ${{ inputs['working-directory'] || '.' }}
+      flutter-channel: ${{ inputs['flutter-channel'] || 'stable' }}
+      test-target: ${{ inputs['test-target'] || 'test' }}
+      codegen: ${{ inputs.codegen || 'none' }}
+      test-concurrency: ${{ inputs['test-concurrency'] || 0 }}

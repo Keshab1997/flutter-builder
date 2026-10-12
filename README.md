@@ -99,6 +99,26 @@ CI আর কোনো push বা pull request-এ নিজে থেকে �
 
 আগে install করা project-এ এই আচরণ চাইলে `install.sh --force` চালান (আগের ফাইল backup হয়); শুধু pin সরাতে চাইলে `bump-ref.sh`-ই যথেষ্ট।
 
+### দ্রুত Widget-test diagnostics (manual)
+
+`flutter test` debug mode-এ চালিয়ে layout/runtime error—যেমন `RenderFlex overflowed`—ধরে। Emulator লাগে না। App repo-তে `.github/workflows/flutter-widget-tests.yml` এবং `examples/project-workflows/widget-tests.yml`—দুটি ফাইলই কপি করুন; তারপর Actions → **Flutter widget-test diagnostics** → **Run workflow** চালান। Run summary-তে error-এর আশেপাশের log দেখাবে, আর পুরো output `flutter-widget-test-log` artifact-এ থাকবে। Workflow নিজে কোনো screen-এ navigate করে না; শুধু `test-target`-এ থাকা tests চালায়.
+
+Mobile overflow ধরতে সংশ্লিষ্ট screen-টা test-এ phone-sized viewport-এ pump করুন:
+
+```dart
+testWidgets('home fits a phone viewport', (tester) async {
+  tester.view.physicalSize = const Size(360, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
+  await tester.pumpWidget(const MyApp()); // app-এর root/target screen দিয়ে বদলান
+  await tester.pumpAndSettle();
+});
+```
+
+Test-এ ওই screen না উঠলে workflow ওই screen-এর overflow খুঁজে পাবে না। Log copy করে AI-কে দিতে পারো; log-এ secret বা user data print করা হলে আগে সেগুলো সরিয়ে নাও।
+
 ## CI আরও দ্রুত — build cache (v1.10+)
 
 Flutter SDK আর pub cache আগেই ছিল; কিন্তু Android build-এ সময় যেত **Gradle**-এর পিছনে, যা ওই cache-এর আওতায় পড়ে না। এখন:
@@ -344,6 +364,7 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 ## Repository contents
 
 - `.github/workflows/flutter-build.yml` — reusable CI/build workflow
+- `.github/workflows/flutter-widget-tests.yml` — reusable, fast debug-mode widget-test diagnostics (log artifact + error summary)
 - `.github/workflows/publish-release.yml` — reusable signed release workflow
 - `.github/workflows/web-preview.yml` — reusable web preview deployment
 - `scripts/install.sh` — caller workflow installer
@@ -357,6 +378,6 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 - `scripts/doctor.sh` — app configuration checker
 - `examples/project-workflows/` — app repository-তে ব্যবহারের নমুনা workflow
 - `docs/` — signing ও secret setup নির্দেশিকা
-- `tests/` — installer, agent pack, preview cleanup/timing ও CI trigger-এর unittest (Flutter SDK ছাড়াই চলে)
+- `tests/` — installer, agent pack, preview cleanup/timing, widget-test workflow ও CI trigger-এর unittest (Flutter SDK ছাড়াই চলে)
 
 License: [MIT](LICENSE).
