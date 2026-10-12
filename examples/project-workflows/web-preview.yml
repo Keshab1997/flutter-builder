@@ -4,8 +4,10 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 # preview/<branch>, so you can test the app by opening a URL in a browser
 # instead of downloading and installing an APK.
 #
-# Manual only: run it from Actions -> Run workflow when you want a fresh
-# preview; nothing runs on a push or pull request.
+# Automatically refreshes previews on relevant branch pushes. A same-repository
+# open PR gets the URL comment updated from that push run, avoiding a duplicate
+# build on pull_request.synchronize. Documentation/workflow-only changes are
+# ignored; use Actions -> Run workflow for a one-off rebuild.
 #
 # One-time setup: Settings -> Pages -> Deploy from a branch -> gh-pages (root).
 # The first run creates the gh-pages branch.
@@ -16,6 +18,17 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 # file before relying on that.
 
 on:
+  push:
+    branches:
+      - '**'
+      - '!gh-pages'
+      - '!ui-screenshots'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'distribution/**'
+      - '.github/**'
+      - 'LICENSE'
   workflow_dispatch:
   delete:
 

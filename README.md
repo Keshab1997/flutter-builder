@@ -9,7 +9,7 @@ Flutter project-এর জন্য reusable GitHub Actions workflows। প্�
 | `ci.yml` | **Flutter CI — Format, Analyze & Test** | শুধু manual run-এ (Actions → Run workflow) Dart format, analyze, test/coverage চালায়; APK/AAB বানায় না। |
 | `manual-build.yml` | **Build Android APK or AAB (Manual)** | Actions থেকে বেছে নিলে APK অথবা AAB build করে artifact দেয়। |
 | `publish-release.yml` | **Publish Signed Android Release** | একবার signed APK/AAB build করে GitHub Release প্রকাশ করে; চাইলে একই AAB Google Play Internal testing-এ upload ও Play release notes পাঠায়। |
-| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Manual run-এ web build করে branch-ভিত্তিক Pages preview প্রকাশ করে; branch delete হলে সেই preview gh-pages থেকে মুছে দেয়। |
+| `web-preview.yml` | **Deploy Flutter Web Preview (GitHub Pages)** | Relevant branch push-এ নিজে থেকে preview refresh করে; docs/workflow-only changes skip করে, branch delete হলে preview মুছে দেয়। |
 
 
 ## দ্রুত setup (প্রস্তাবিত)
@@ -93,7 +93,7 @@ Exit code: `0` = commit/push হয়েছে, `1` = push fail, `2` = কি�
 
 CI আর কোনো push বা pull request-এ নিজে থেকে চলে না। ছোট ছোট পরিবর্তন জমিয়ে, কাজ শেষ হলে **Actions → Flutter CI — Format, Analyze & Test → Run workflow** দিয়ে একবার চালান — তাতে প্রতি ছোট edit-এ একটা run খরচ হয় না।
 
-- caller-এর `on:`-এ শুধু `workflow_dispatch:` থাকে — `push`/`pull_request` নেই
+- CI caller-এর `on:`-এ শুধু `workflow_dispatch:` থাকে — `push`/`pull_request` নেই (web preview আলাদা, সেটি branch push-এ automatic)
 - agent সরাসরি `main`-এ push করে; কোনো feature branch বা pull request লাগে না
 - CI চালানোর দায়িত্ব human-এর; agent শুধু `preflight.py` চালিয়ে নিশ্চিত হয়
 
@@ -202,7 +202,9 @@ in this reusable-workflow repository.
 
 ### Web preview (optional)
 
-`web-preview.yml` এখন manual — Actions → **Deploy Flutter Web Preview (GitHub Pages)** → Run workflow দিলে Flutter web build deploy হয় (push/PR-এ নিজে থেকে চলে না)। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions run summary-তে দেখা যায়।
+`web-preview.yml` install করলে relevant branch push-এ preview নিজে থেকে build/deploy হয়; শুধু docs, Markdown, release notes ও `.github/`-এর পরিবর্তনে run হয় না। PR branch-এ push হলেই preview refresh হয়, আর একই-repo PR-এর comment-এ URL update হয়—তাই আলাদা `pull_request` build হয় না। One-off rebuild দরকার হলে Actions → **Deploy Flutter Web Preview (GitHub Pages)** → Run workflow ব্যবহার করুন। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions summary ও preview hub-এ দেখা যায়.
+
+প্রতি deploy-এ শুধু সেই branch-এর পুরোনো `preview/<branch>` files মুছে fresh build বসে; অন্য branch preview বা Pages root অক্ষত থাকে। Flutter SDK/pub cache রাখা হয় (এগুলো build দ্রুত করে); `flutter pub get` একবার চালিয়ে build-এ `--no-pub` ব্যবহার করা হয়। GitHub Pages-এর browser/CDN cache-কে workflow দিয়ে তাৎক্ষণিক purge করা যায় না, তাই কোনো পুরোনো response অল্প সময় দেখা গেলে hard refresh দরকার হতে পারে. Strict cache-header/invalidation control চাইলে Cloudflare Pages/Firebase Hosting-এর মতো host ভালো fit.
 
 **সব preview এক জায়গায় (preview hub, v1.10+):** প্রতিটা deploy-এর পরে `…/<repo>/preview/` পেজটা নিজে থেকে আপডেট হয় — ওখানে সব branch-এর preview একসাথে লিস্ট হয়ে থাকে, তাই Actions run summary খোঁজার দরকার নেই:
 
@@ -216,7 +218,7 @@ https://keshab1997.github.io/<repo>/preview/
 
 #### Branch delete হলে preview cleanup (v1.8.2+)
 
-প্রতিটি preview gh-pages-এ ৩০–৬০ MB জায়গা নেয় আর branch মুছে গেলেও folder পড়ে থাকে। তাই `web-preview.yml`-এর install করা version-এ `delete` trigger সহ দুটি job থাকে: `preview` (push/PR) আর `cleanup` (branch delete)। Branch মুছে ফেললে `preview/<branch>` folder-টা gh-pages থেকে চলে যায়, ফলে gh-pages অকারণে বাড়ে না।
+প্রতিটি preview gh-pages-এ ৩০–৬০ MB জায়গা নেয় আর branch মুছে গেলেও folder পড়ে থাকে। তাই `web-preview.yml`-এর install করা version-এ `delete` trigger সহ দুটি job থাকে: `preview` (branch push বা one-off manual run) আর `cleanup` (branch delete)। Branch মুছে ফেললে `preview/<branch>` folder-টা gh-pages থেকে চলে যায়, ফলে gh-pages অকারণে বাড়ে না।
 
 কেন দুটো job একই ফাইলে: `delete` event শুধু সেই repository-তেই fire করে যেখানে branch-টা ছিল, আর delete-triggered workflow সবসময় **default branch** থেকে চলে — তাই `cleanup` job caller ফাইলেই থাকতে হবে এবং merge হওয়ার পরেই কাজ করবে।
 
@@ -226,7 +228,17 @@ Reusable workflow-টা আলাদাভাবে ব্যবহার ক�
 name: Web preview + cleanup
 on:
   push:
-  pull_request:
+    branches:
+      - '**'
+      - '!gh-pages'
+      - '!ui-screenshots'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'distribution/**'
+      - '.github/**'
+      - 'LICENSE'
+  workflow_dispatch:
   delete:
 
 permissions:
@@ -258,7 +270,7 @@ jobs:
       contents: write
 ```
 
-Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে। সব preview একটাই concurrency lane-এ (`group: web-preview`) চলে, কারণ gh-pages একটাই: deploy action compare-and-swap দিয়ে push করে, তাই দুই রান একসাথে লিখলে একটা reject হয় — আর branch update করলেই push ও pull_request দুটো ইভেন্ট একসাথে চলে, ফলে collision সহজ। Queue করার ফলে delete-এর cleanup কোনো চলমান deploy বাতিল করে না; reject হলে cleanup fetch + rebase করে ৫ বার চেষ্টা করে। এই ফিক্সগুলো **v1.8.6**-এ আছে। **গুরুত্বপূর্ণ:** delete event-এর payload called workflow-এর ভেতরে পড়া যায় না, আর delete event-এ `github.ref_name` হলো *default branch* — তাই আগে cleanup `main` ধরে নিয়ে keep-branches-এ skip হয়ে চুপচাপ কিছুই মোছেনি। এখন caller-ই deleted ref পাঠায় (`branch-name: ${{ github.event.ref }}`), আর reusable workflow `github.event.ref`-ও দেখে; কোনো ref না পেলে `::warning::` দিয়ে সেটা জানায় — নীরব no-op নয়।
+Cleanup যেভাবে branch name পরিষ্কার করে তা deploy-এর সাথে **হুবহু** একই (`Feature/New Thing` → `preview/feature-new-thing`) এবং একটা test দুটোকে মিলিয়ে রাখে। নিরাপত্তার জন্য `main`/`master` (`keep-branches` দিয়ে বদলানো যায়) skip হয়, tag delete-এ কিছু হয় না, pages root বা তার বাইরের path মুছতে **refuse** করে, আর preview না থাকলে চুপচাপ no-op। `destination-dir` কাস্টম হলে সেটাও সম্মান করে; `dry-run: true` দিয়ে আগে পরীক্ষা করা যায়। কী মুছল/কেন ছাড়ল তা step summary-তে লেখা থাকে। সব preview একটাই concurrency lane-এ (`group: web-preview`) চলে, কারণ gh-pages একটাই: deploy action compare-and-swap দিয়ে push করে, তাই দুই রান একসাথে লিখলে একটা reject হয়। Auto caller শুধু `push` ব্যবহার করে—PR branch push-ই preview update করে, আলাদা `pull_request.synchronize` build লাগে না। Queue করার ফলে delete-এর cleanup কোনো চলমান deploy বাতিল করে না; reject হলে cleanup fetch + rebase করে ৫ বার চেষ্টা করে। এই ফিক্সগুলো **v1.8.6**-এ আছে। **গুরুত্বপূর্ণ:** delete event-এর payload called workflow-এর ভেতরে পড়া যায় না, আর delete event-এ `github.ref_name` হলো *default branch* — তাই আগে cleanup `main` ধরে নিয়ে keep-branches-এ skip হয়ে চুপচাপ কিছুই মোছেনি। এখন caller-ই deleted ref পাঠায় (`branch-name: ${{ github.event.ref }}`), আর reusable workflow `github.event.ref`-ও দেখে; কোনো ref না পেলে `::warning::` দিয়ে সেটা জানায় — নীরব no-op নয়।
 
 ### About → Website link নিজে সেট (v1.8.6+)
 

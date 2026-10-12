@@ -297,13 +297,25 @@ name: Deploy Flutter Web Preview (GitHub Pages)
 
 # Builds the app for the web and publishes it to GitHub Pages under
 # preview/<branch>: test the app by opening a URL in a browser instead of
-# installing an APK. Manual only: run it from Actions -> Run workflow when you
-# want a fresh preview; nothing runs on a push or pull request. One-time setup:
-# Settings -> Pages -> Build and deployment -> Deploy from a branch -> gh-pages
-# (root); the first run creates the branch. Needs the web platform (flutter
-# create --platforms web .); plugins without web support will not work in the
-# preview.
+# installing an APK. It refreshes automatically on relevant branch pushes;
+# documentation/workflow-only changes are ignored. Same-repo PR comments are
+# updated from the push run, avoiding duplicate builds. Use Run workflow for a
+# one-off rebuild. One-time setup: Settings -> Pages -> Build and deployment ->
+# Deploy from a branch -> gh-pages (root); the first run creates the branch.
+# Needs the web platform (flutter create --platforms web .); plugins without web
+# support will not work in the preview.
 on:
+  push:
+    branches:
+      - '**'
+      - '!gh-pages'
+      - '!ui-screenshots'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'distribution/**'
+      - '.github/**'
+      - 'LICENSE'
   workflow_dispatch:
   delete:
 
@@ -314,10 +326,10 @@ permissions:
 # All previews of one repository share a single lane, because they share one
 # gh-pages branch. Every writer runs alone: the deploy action pushes with a
 # compare-and-swap and refuses a push when another run moved the branch in the
-# meantime ("cannot lock ref ... is expected"), and updating a branch that has an
-# open pull request fires a push run and a pull_request run at the same time.
-# Queueing also keeps a deleted branch's cleanup from cancelling, or being
-# cancelled by, the deploy of the default branch.
+# meantime ("cannot lock ref ... is expected"). Branch push is the sole
+# automatic preview trigger, so a PR-branch update does not start a duplicate
+# pull_request run. Queueing also keeps a deleted branch's cleanup from
+# cancelling, or being cancelled by, the deploy of the default branch.
 concurrency:
   group: web-preview
   cancel-in-progress: false

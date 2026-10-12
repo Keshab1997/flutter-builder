@@ -1,12 +1,9 @@
-"""CI runs only when a human asks for it.
+"""CI stays manual; web previews refresh automatically.
 
-The caller templates used to validate every push and pull request, which meant a
-CI run for every small edit. They are now manual-only: nothing runs on push or
-pull_request, and the work lands on `main` in batches. These checks pin that:
-
-  * the caller's `on:` block is `workflow_dispatch` and nothing else;
-  * the installer's generated caller and the example agree on it;
-  * the draft guard is gone from the caller (there is no pull_request event).
+The CI caller stays manual-only so small changes can be batched. The web-preview
+caller is the exception: it refreshes on relevant branch pushes, keeps a manual
+dispatch, and skips documentation/workflow-only changes. These checks pin that
+CI remains manual and the installer/example preview callers stay aligned.
 
 The reusable `flutter-build.yml` still carries the `skip-draft-prs` guard, so a
 caller that chooses to use pull requests keeps the old behaviour.
@@ -59,7 +56,7 @@ class ReusableWorkflowTests(unittest.TestCase):
 
 
 class GeneratedCallerTests(unittest.TestCase):
-    """The installer's payload and the examples must stay in step: manual-only."""
+    """CI stays manual while the generated preview caller is automatic."""
 
     def setUp(self) -> None:
         self.installer = INSTALLER.read_text(encoding="utf-8")
@@ -78,6 +75,19 @@ class GeneratedCallerTests(unittest.TestCase):
         self.assertNotIn("  push:", text, f"{where}: a push trigger is back")
         self.assertNotIn("  pull_request:", text,
                          f"{where}: a pull_request trigger is back")
+
+    def assert_auto_preview(self, text: str, where: str) -> None:
+        self.assertIn("on:\n  push:\n", text, f"{where}: push trigger is missing")
+        self.assertIn("      - '!gh-pages'\n", text,
+                      f"{where}: Pages writes must not trigger another build")
+        self.assertIn("    paths-ignore:\n", text,
+                      f"{where}: docs/workflow-only changes should be skipped")
+        self.assertIn("      - 'distribution/**'\n", text,
+                      f"{where}: release-note-only changes should be skipped")
+        self.assertIn("  workflow_dispatch:\n  delete:\n", text,
+                      f"{where}: manual run and deleted-branch cleanup must remain")
+        self.assertNotIn("  pull_request:", text,
+                         f"{where}: PR branch pushes already trigger the preview")
 
     def test_installer_generated_ci_is_manual_only(self) -> None:
         self.assert_manual_only(self.ci_block(self.installer),
@@ -99,17 +109,13 @@ class GeneratedCallerTests(unittest.TestCase):
         self.assertIsNotNone(match, "web-preview block not found in install.sh")
         return match.group(1)
 
-    def test_installer_generated_web_preview_is_manual_only(self) -> None:
-        block = self.preview_block(self.installer)
-        self.assertIn("on:\n  workflow_dispatch:\n  delete:\n", block)
-        self.assertNotIn("  push:", block)
-        self.assertNotIn("  pull_request:", block)
+    def test_installer_generated_web_preview_is_automatic_for_relevant_pushes(self) -> None:
+        self.assert_auto_preview(self.preview_block(self.installer),
+                                 "install.sh web-preview.yml")
 
-    def test_the_web_preview_example_keeps_cleanup_and_is_manual_only(self) -> None:
-        text = EXAMPLE_PREVIEW.read_text(encoding="utf-8")
-        self.assertIn("on:\n  workflow_dispatch:\n  delete:\n", text)
-        self.assertNotIn("  push:", text)
-        self.assertNotIn("  pull_request:", text)
+    def test_the_web_preview_example_keeps_automatic_push_and_cleanup(self) -> None:
+        self.assert_auto_preview(EXAMPLE_PREVIEW.read_text(encoding="utf-8"),
+                                 "example web-preview.yml")
 
 
 if __name__ == "__main__":

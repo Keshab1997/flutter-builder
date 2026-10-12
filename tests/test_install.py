@@ -87,6 +87,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("branch-name: ${{ github.event.ref }}", before["web-preview.yml"])
         self.assertIn("set-about-link: true", before["web-preview.yml"])
         self.assertIn("app-id: ${{ vars.APP_ID }}", before["web-preview.yml"])
+        self.assertIn("on:\n  push:\n", before["web-preview.yml"])
+        self.assertIn("paths-ignore:", before["web-preview.yml"])
+        self.assertIn("  workflow_dispatch:", before["web-preview.yml"])
         self.assertIn("  delete:", before["web-preview.yml"])
         self.assertIn("if: github.event_name != 'delete'", before["web-preview.yml"])
         self.assertIn(
@@ -224,6 +227,8 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer()
         self.assert_success(result)
         caller = self.installed("web-preview.yml")
+        self.assertIn("on:\n  push:\n", caller)
+        self.assertIn("  workflow_dispatch:", caller)
         self.assertIn("  delete:", caller)
         self.assertIn(f"preview-cleanup.yml@{PIN}", caller)
         self.assertIn("branch-name: ${{ github.event.ref }}", caller)

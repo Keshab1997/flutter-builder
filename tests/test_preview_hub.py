@@ -134,6 +134,23 @@ class WorkflowWiringTests(unittest.TestCase):
     def test_the_summary_points_at_the_hub(self) -> None:
         self.assertIn("All previews:", self.text)
 
+    def test_deploy_replaces_only_the_current_preview_directory(self) -> None:
+        """Clear old assets for this branch without wiping other Pages paths."""
+        self.assertIn("destination_dir: ${{ steps.paths.outputs.dest-dir }}", self.text)
+        self.assertIn("keep_files: false", self.text)
+        self.assertNotIn("keep_files: true", self.text)
+
+    def test_web_build_reuses_the_dependency_resolve(self) -> None:
+        self.assertIn("cache: true", self.text)
+        self.assertIn("run: flutter pub get", self.text)
+        self.assertIn("flutter build web --release --no-pub", self.text)
+
+    def test_branch_push_updates_the_open_pr_preview_comment(self) -> None:
+        self.assertIn("github.event_name == 'push'", self.text)
+        self.assertIn("github.rest.pulls.list", self.text)
+        self.assertIn('head: `${context.repo.owner}:${process.env.BRANCH_NAME}`',
+                      self.text)
+
 
 if __name__ == "__main__":
     unittest.main()
