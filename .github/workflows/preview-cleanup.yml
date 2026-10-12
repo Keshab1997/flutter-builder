@@ -1,10 +1,10 @@
 name: Reusable Flutter Web Preview Cleanup
 
-# Removes the preview/<branch> directory from the Pages branch after a branch
+# Removes the preview/<slug> directory from the Pages branch after a branch
 # is deleted, so gh-pages does not keep a whole web bundle (often 40-60 MB) for
-# every branch that ever had a preview. Pair it with web-preview.yml; both
-# compute the directory the same way, so cleanup always finds the deploy's
-# folder (tests/test_preview_cleanup.py fails if those two ever drift apart).
+# every branch that ever had a preview. Pair it with web-preview.yml; both use
+# the same collision-safe slug rule, so cleanup finds the deployed folder
+# (tests/test_preview_cleanup.py fails if those two ever drift apart).
 #
 # A `delete` event only fires in the repository that owns the branch, so the
 # caller has to pass it on. Recommended caller - the same file as the preview
@@ -33,7 +33,7 @@ name: Reusable Flutter Web Preview Cleanup
 # - Branches listed in keep-branches (main, master by default) are never touched.
 # - Deleting a *tag* is ignored.
 # - A custom `destination-dir` on the deploy side must be passed here as well,
-#   otherwise cleanup looks for preview/<branch>.
+#   otherwise cleanup looks for preview/<slug>.
 
 on:
   workflow_call:
@@ -164,9 +164,20 @@ jobs:
               ;;
           esac
 
-          # Same sanitising as the preview deploy: keep the two in step.
-          slug="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
-          [ -n "$slug" ] || slug="branch"
+          # Same collision-safe path rule as the preview deploy. Keep old paths
+          # for short canonical names; add a digest when normalization is lossy,
+          # the name is long, or it already looks like a generated slug.
+          safe="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
+          [ -n "$safe" ] || safe="branch"
+          if [ "$branch" = "$safe" ] && [ "${#safe}" -le 40 ] && \
+             ! [[ "$branch" =~ -[0-9a-f]{16}$ ]]; then
+            slug="$safe"
+          else
+            prefix="${safe:0:40}"
+            [ -n "$prefix" ] || prefix="branch"
+            suffix="$(printf '%s' "$branch" | sha256sum | cut -c1-16)"
+            slug="${prefix}-${suffix}"
+          fi
           directory="${DESTINATION_DIR:-${PREVIEW_DIRECTORY}/${slug}}"
           directory="${directory%/}"
 

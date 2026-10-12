@@ -133,7 +133,7 @@ jobs:
     secrets: inherit
 ```
 
-হলো — ব্রাউজারে `preview/<branch>/` লিংক খুললে অ্যাপ চলে। এটা **interactive**, তাই এনিমেশন, স্ক্রল, টাইপ করা সব দেখা যায়। `web/` না থাকলে: `flutter create --platforms=web .` একবার চালালেই যোগ হবে।
+হলো — ব্রাউজারে `preview/<slug>/` লিংক খুললে অ্যাপ চলে। এটা **interactive**, তাই এনিমেশন, স্ক্রল, টাইপ করা সব দেখা যায়। `web/` না থাকলে: `flutter create --platforms=web .` একবার চালালেই যোগ হবে।
 
 ### UI screenshots (PR-এর ভেতরে ছবি)
 
@@ -204,7 +204,15 @@ in this reusable-workflow repository.
 
 `web-preview.yml` install করলে relevant branch push-এ preview নিজে থেকে build/deploy হয়; শুধু docs, Markdown, release notes ও `.github/`-এর পরিবর্তনে run হয় না। PR branch-এ push হলেই preview refresh হয়, আর একই-repo PR-এর comment-এ URL update হয়—তাই আলাদা `pull_request` build হয় না। One-off rebuild দরকার হলে Actions → **Deploy Flutter Web Preview (GitHub Pages)** → Run workflow ব্যবহার করুন। App-এ `web/` folder থাকতে হবে। একবার repository-তে **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` (root)** নির্বাচন করুন। Preview URL Actions summary ও preview hub-এ দেখা যায়.
 
-প্রতি deploy-এ শুধু সেই branch-এর পুরোনো `preview/<branch>` files মুছে fresh build বসে; অন্য branch preview বা Pages root অক্ষত থাকে। Flutter SDK/pub cache রাখা হয় (এগুলো build দ্রুত করে); `flutter pub get` একবার চালিয়ে build-এ `--no-pub` ব্যবহার করা হয়। GitHub Pages-এর browser/CDN cache-কে workflow দিয়ে তাৎক্ষণিক purge করা যায় না, তাই কোনো পুরোনো response অল্প সময় দেখা গেলে hard refresh দরকার হতে পারে. Strict cache-header/invalidation control চাইলে Cloudflare Pages/Firebase Hosting-এর মতো host ভালো fit.
+প্রতি deploy-এ শুধু সেই branch-এর পুরোনো `preview/<slug>` files মুছে fresh build বসে; অন্য branch preview বা Pages root অক্ষত থাকে। Flutter SDK/pub cache রাখা হয় (এগুলো build দ্রুত করে); `flutter pub get` একবার চালিয়ে build-এ `--no-pub` ব্যবহার করা হয়। GitHub Pages-এর browser/CDN cache-কে workflow দিয়ে তাৎক্ষণিক purge করা যায় না, তাই কোনো পুরোনো response অল্প সময় দেখা গেলে hard refresh দরকার হতে পারে. Strict cache-header/invalidation control চাইলে cache control দেয় এমন hosting ভালো fit.
+
+যে branch name সরাসরি safe slug হয় (যেমন `main`, `feature-foo`) তার URL আগের মতোই থাকে। Slash, uppercase, Unicode, অন্য lossy name, ৪০ character-এর বেশি branch, বা শেষে `-`-সহ ১৬টি lowercase hex থাকলে slug-এ ১৬-character hash যোগ হয়, যাতে আলাদা branch একই preview path-এ না পড়ে। Upgrade-এর পর এমন branch-এর পুরোনো sanitized folder gh-pages-এ থেকে যেতে পারে; নতুন link-টাই ব্যবহার করুন; পুরোনো folder একবার manually remove করতে হতে পারে। Preview কতক্ষণ নিচ্ছে মাপতে (read-only):
+
+```bash
+python3 scripts/preview_timing.py --repo OWNER/REPO --limit 20
+```
+
+এটি recent run-এর workflow ও job duration, এবং Flutter setup, `pub get`, web build, Pages deploy-এর step timing ও median দেখায়। Private repo-তে `gh auth login`, `GITHUB_TOKEN`/`GH_TOKEN` বা `--token-file PATH` ব্যবহার করুন; token কখনো output হয় না.
 
 **সব preview এক জায়গায় (preview hub, v1.10+):** প্রতিটা deploy-এর পরে `…/<repo>/preview/` পেজটা নিজে থেকে আপডেট হয় — ওখানে সব branch-এর preview একসাথে লিস্ট হয়ে থাকে, তাই Actions run summary খোঁজার দরকার নেই:
 
@@ -218,7 +226,7 @@ https://keshab1997.github.io/<repo>/preview/
 
 #### Branch delete হলে preview cleanup (v1.8.2+)
 
-প্রতিটি preview gh-pages-এ ৩০–৬০ MB জায়গা নেয় আর branch মুছে গেলেও folder পড়ে থাকে। তাই `web-preview.yml`-এর install করা version-এ `delete` trigger সহ দুটি job থাকে: `preview` (branch push বা one-off manual run) আর `cleanup` (branch delete)। Branch মুছে ফেললে `preview/<branch>` folder-টা gh-pages থেকে চলে যায়, ফলে gh-pages অকারণে বাড়ে না।
+প্রতিটি preview gh-pages-এ ৩০–৬০ MB জায়গা নেয় আর branch মুছে গেলেও folder পড়ে থাকে। তাই `web-preview.yml`-এর install করা version-এ `delete` trigger সহ দুটি job থাকে: `preview` (branch push বা one-off manual run) আর `cleanup` (branch delete)। Branch মুছে ফেললে `preview/<slug>` folder-টা gh-pages থেকে চলে যায়, ফলে gh-pages অকারণে বাড়ে না।
 
 কেন দুটো job একই ফাইলে: `delete` event শুধু সেই repository-তেই fire করে যেখানে branch-টা ছিল, আর delete-triggered workflow সবসময় **default branch** থেকে চলে — তাই `cleanup` job caller ফাইলেই থাকতে হবে এবং merge হওয়ার পরেই কাজ করবে।
 
@@ -343,11 +351,12 @@ bash /path/to/flutter-builder/scripts/doctor.sh
 - `agent-pack/` — agent pack-এর canonical ফাইল, যা installer-এর ভিতরে embed করা (tests দুই কপি এক রাখে)
 - `scripts/sync-agent-pack.py` — canonical ফাইল আর installer-এর embedded কপি এক রাখে (`--check` দিলে শুধু জানায়); সবসময় `agent-pack/` edit করে এটা চালান
 - `scripts/preview-hub.sh` — প্রতি deploy-এ `preview/index.html` আপডেট করে (সব branch-এর লিংক এক পাতায়; ব্যর্থ হলেও deploy লাল হয় না)
+- `scripts/preview_timing.py` — recent preview run-এর step timing ও median দেখায় (read-only; no Flutter SDK)
 - `scripts/capture-screenshots.sh` — web build-এর ছবি তোলে (Playwright চালায়; `ui-screenshots.yml` আর smoke test দুটোই এটাই চালায়)
 - `scripts/embed-screenshots.sh` — ছবি `ui-screenshots` branch-এ push করে PR-এ comment দেয় (কিছু ব্যর্থ হলেও build লাল হয় না)
 - `scripts/doctor.sh` — app configuration checker
 - `examples/project-workflows/` — app repository-তে ব্যবহারের নমুনা workflow
 - `docs/` — signing ও secret setup নির্দেশিকা
-- `tests/` — installer, agent pack, preview cleanup ও CI trigger-এর unittest (Flutter SDK ছাড়াই চলে)
+- `tests/` — installer, agent pack, preview cleanup/timing ও CI trigger-এর unittest (Flutter SDK ছাড়াই চলে)
 
 License: [MIT](LICENSE).

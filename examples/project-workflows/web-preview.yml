@@ -1,7 +1,7 @@
 name: Deploy Flutter Web Preview (GitHub Pages)
 
 # Builds the app for the web and publishes it to GitHub Pages under
-# preview/<branch>, so you can test the app by opening a URL in a browser
+# preview/<slug>, so you can test the app by opening a URL in a browser
 # instead of downloading and installing an APK.
 #
 # Automatically refreshes previews on relevant branch pushes. A same-repository

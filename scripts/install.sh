@@ -296,7 +296,7 @@ YAML
 name: Deploy Flutter Web Preview (GitHub Pages)
 
 # Builds the app for the web and publishes it to GitHub Pages under
-# preview/<branch>: test the app by opening a URL in a browser instead of
+# preview/<slug>: test the app by opening a URL in a browser instead of
 # installing an APK. It refreshes automatically on relevant branch pushes;
 # documentation/workflow-only changes are ignored. Same-repo PR comments are
 # updated from the push run, avoiding duplicate builds. Use Run workflow for a

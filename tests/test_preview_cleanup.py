@@ -8,6 +8,7 @@ third-party modules required.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import shlex
 import subprocess
@@ -27,7 +28,7 @@ USES_REFERENCE = re.compile(
 )
 DEFAULT_REF = re.compile(r"^DEFAULT_REF=(\S+)$", re.MULTILINE)
 
-# Branch name -> directory slug, exactly as web-preview.yml publishes them.
+# Branch name -> readable part of the slug before the optional hash suffix.
 SLUG_CASES = {
     "main": "main",
     "fix/tool-correctness": "fix-tool-correctness",
@@ -51,7 +52,7 @@ def sed_expressions(path: Path) -> list[str]:
 
 
 def slug(expression: str, branch: str) -> str:
-    """Run the workflow's own shell pipeline for one branch name."""
+    """Apply the workflow sanitizer and collision-safe hash rule."""
     script = (
         f"printf '%s' {shlex.quote(branch)}"
         f" | tr '[:upper:]' '[:lower:]'"
@@ -63,7 +64,14 @@ def slug(expression: str, branch: str) -> str:
         capture_output=True,
         text=True,
     )
-    return result.stdout
+    safe = result.stdout or "branch"
+    if branch == safe and len(safe) <= 40 and not re.search(
+        r"-[0-9a-f]{16}$", branch
+    ):
+        return safe
+    prefix = safe[:40] or "branch"
+    digest = hashlib.sha256(branch.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}-{digest}"
 
 
 class PreviewCleanupTests(unittest.TestCase):
@@ -91,12 +99,36 @@ class PreviewCleanupTests(unittest.TestCase):
             "preview deploy and preview cleanup sanitise branch names "
             "differently, so cleanup would look in the wrong directory",
         )
+        for path in (DEPLOY, CLEANUP):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("sha256sum | cut -c1-16", text, path)
+            self.assertIn('[ "${#safe}" -le 40 ]', text, path)
+            self.assertIn("-[0-9a-f]{16}$", text, path)
 
     def test_branch_names_slugify_to_the_published_directory(self) -> None:
         expression = sed_expressions(DEPLOY)[0]
-        for branch, expected in SLUG_CASES.items():
+        for branch, readable in SLUG_CASES.items():
             with self.subTest(branch=branch):
+                digest = hashlib.sha256(branch.encode("utf-8")).hexdigest()[:16]
+                if branch == readable and len(readable) <= 40:
+                    expected = readable
+                else:
+                    expected = f"{readable[:40]}-{digest}"
                 self.assertEqual(slug(expression, branch), expected)
+
+    def test_lossy_names_do_not_collide_with_canonical_or_hash_looking_names(self) -> None:
+        expression = sed_expressions(DEPLOY)[0]
+        lossy = slug(expression, "fix/tool")
+        canonical = slug(expression, "fix-tool")
+        hash_looking = slug(expression, lossy)
+        self.assertNotEqual(lossy, canonical)
+        self.assertNotEqual(lossy, hash_looking)
+
+    def test_hashed_branch_slug_stays_short_for_long_names(self) -> None:
+        expression = sed_expressions(DEPLOY)[0]
+        result = slug(expression, "feature/" + "a" * 120)
+        self.assertLessEqual(len(result), 57)
+        self.assertRegex(result, r"^.{1,40}-[0-9a-f]{16}$")
 
     def test_cleanup_never_removes_the_whole_pages_tree(self) -> None:
         self.assertIn("Refusing to remove", self.cleanup)

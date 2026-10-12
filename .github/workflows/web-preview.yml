@@ -18,15 +18,17 @@ name: Reusable Flutter Web Preview Deployment
 # - The caller MUST pass `secrets: inherit` (the deploy uses GITHUB_TOKEN).
 # - Plugins without a web implementation (camera, bluetooth, ...) will not
 #   work here; the preview is only as good as the app's web support.
-# - Each branch gets its own directory (preview/<branch>), so several previews
-#   can coexist. Every deploy replaces only its destination directory, clearing
-#   stale files while preserving other branches and the Pages root.
+# - Each branch gets its own directory (preview/<slug>), so several previews
+#   can coexist. Lossy/long branch names get a short hash suffix to avoid slug
+#   collisions; simple names retain their existing URLs. Every deploy replaces
+#   only its destination directory, clearing stale files but preserving other
+#   previews and the Pages root.
 # - `set-about-link: true` keeps the repository's About -> Website link on the
 #   preview of the default branch (see the README). Off by default because it
 #   needs a credential with administration: write, which GITHUB_TOKEN is not.
 # - The release web deploy in flutter-build.yml (deploy-web-pages) publishes
 #   to the Pages root and wipes other files. If a caller uses both, a release
-#   web deploy removes preview/<branch> directories until the next push
+#   web deploy removes preview/<slug> directories until the next push
 #   recreates them.
 
 on:
@@ -43,7 +45,7 @@ on:
         type: string
         default: stable
       destination-dir:
-        description: Directory on the gh-pages branch (empty = preview/<branch>)
+        description: Directory on the gh-pages branch (empty = preview/<slug>)
         required: false
         type: string
         default: ""
@@ -142,7 +144,21 @@ jobs:
           safe="$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
           [ -n "$safe" ] || safe="branch"
 
-          dest_dir="${DESTINATION_DIR:-preview/${safe}}"
+          # Keep existing URLs for simple names. Lossy normalization (slash,
+          # uppercase, Unicode, etc.), long names, and names that look like our
+          # hash suffix get a deterministic digest so distinct refs cannot
+          # silently share one preview directory.
+          if [ "$REF_NAME" = "$safe" ] && [ "${#safe}" -le 40 ] && \
+             ! [[ "$REF_NAME" =~ -[0-9a-f]{16}$ ]]; then
+            slug="$safe"
+          else
+            prefix="${safe:0:40}"
+            [ -n "$prefix" ] || prefix="branch"
+            suffix="$(printf '%s' "$REF_NAME" | sha256sum | cut -c1-16)"
+            slug="${prefix}-${suffix}"
+          fi
+
+          dest_dir="${DESTINATION_DIR:-preview/${slug}}"
           base_href="${BASE_HREF:-/${repo}/${dest_dir}/}"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           url="https://${owner}.github.io/${repo}/${dest_dir}/"
