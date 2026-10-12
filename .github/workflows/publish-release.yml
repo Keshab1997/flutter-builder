@@ -15,7 +15,8 @@ name: Reusable Signed Android Release Publisher
 #     publish:
 #       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.14.1
 #       with:
-#         app-name: SpeakEasy
+#         app-name: SpeakEasy   # optional: empty = the app's android:label,
+#                               # else the pubspec name
 #       secrets: inherit
 #
 # Nothing heavy lives here: building, signing, note generation, tagging and
@@ -32,7 +33,7 @@ on:
   workflow_call:
     inputs:
       app-name:
-        description: "Product name for the release title and asset filenames (empty = pubspec name)"
+        description: "Product name for the release title and asset filenames (empty = the app's android:label, else the pubspec name)"
         required: false
         type: string
         default: ""

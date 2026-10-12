@@ -31,7 +31,7 @@ Installer-এ Flutter SDK লাগে না। এটি git commit/push ক�
 ### Installer options
 
 - `--app-dir DIR`: monorepo-তে Flutter app-এর path (repository root থেকে)
-- `--app-name NAME`: release-এ দেখানোর app name; না দিলে `pubspec.yaml`-এর নাম
+- `--app-name NAME`: release-এ দেখানোর app name; না দিলে app-এর `android:label`, তাও না থাকলে `pubspec.yaml`-এর নাম
 - `--ref v1.14.1`: reusable workflow version pin; default `v1.14.1`
 - `--dry-run`: কোনো ফাইল না লিখে পরিবর্তন দেখায়
 - `--force`: আলাদা/কাস্টম workflow backup নিয়ে replace করে

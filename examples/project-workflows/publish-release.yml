@@ -1,9 +1,11 @@
 name: Publish Signed Android Release
 
 # Wrapper-first form: the release policy lives in the builder repo, so this
-# file barely changes between projects — point it at a new app, set the name,
-# done. The older form (calling flutter-build.yml directly and spelling out
-# every input) still works; manual-build.yml uses that shape.
+# file barely changes between projects — point it at a new app and you are
+# done. The release name is the app's own: android:label from the manifest
+# (the name under the app icon), else the pubspec name. Pass app-name below
+# only to override that. The older form (calling flutter-build.yml directly
+# and spelling out every input) still works; manual-build.yml uses that shape.
 
 on:
   workflow_dispatch:
@@ -35,7 +37,8 @@ jobs:
   publish:
     uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.14.1
     with:
-      app-name: My Flutter App
+      # app-name: SpeakEasy   # optional override; default: the app's
+      #                        # android:label, else the pubspec name
       # working-directory: apps/mobile   # if the app lives in a subfolder
       release-draft: ${{ inputs.draft }}
       release-prerelease: ${{ inputs.prerelease }}

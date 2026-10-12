@@ -19,7 +19,7 @@ Run from your project directory (or any directory inside its Git repository):
 
 Options when running a downloaded/local script:
   --app-dir DIR     Flutter app directory, relative to the Git repository root
-  --app-name NAME   Display name for GitHub Releases (default: pubspec name)
+  --app-name NAME   Display name for GitHub Releases (default: the app's android:label, else the pubspec name)
   --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.14.1)
   --dry-run         Show changes without writing files
   --force           Replace differing workflows, backing up originals first

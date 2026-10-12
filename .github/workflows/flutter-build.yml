@@ -124,7 +124,7 @@ on:
         type: boolean
         default: false
       release-name:
-        description: Product name used in the GitHub Release title and asset filenames
+        description: Product name used in the GitHub Release title and asset filenames (empty = the app's android:label, else the pubspec name)
         required: false
         type: string
         default: ""
@@ -1303,6 +1303,7 @@ jobs:
         run: |
           python3 - <<'PYTHON'
           import hashlib
+          import html
           import os
           import re
           import shutil
@@ -1325,10 +1326,69 @@ jobs:
           if separator and not build_number.isdigit():
               raise SystemExit(f"The pubspec build number must be numeric: {build_number}")
 
+          def detect_manifest_label():
+              # The name a user would recognise: the label Android puts under
+              # the app icon (and the one Play shows). Returns None when the
+              # project has no readable label, so the caller can fall back to
+              # the pubspec name instead of guessing.
+              manifest = Path("android/app/src/main/AndroidManifest.xml")
+              if not manifest.is_file():
+                  return None
+              match = re.search(
+                  r'android:label\s*=\s*"([^"\n]+)"',
+                  manifest.read_text(encoding="utf-8"),
+              )
+              if not match:
+                  return None
+              label = match.group(1).strip()
+              if not label:
+                  return None
+              if label.startswith("@string/"):
+                  resource = label[len("@string/"):]
+                  # values/strings.xml is the canonical home; values-*/ files
+                  # only localize it. Plain sorted() would put "values-bn/"
+                  # ahead of "values/" ('-' sorts before '/'), so the default
+                  # locale must be forced to the front explicitly.
+                  candidates = sorted(
+                      Path("android/app/src/main/res").glob("values*/strings.xml"),
+                      key=lambda candidate: (
+                          candidate.parent.name != "values",
+                          str(candidate),
+                      ),
+                  )
+                  for candidate in candidates:
+                      resource_match = re.search(
+                          rf'<string[^>]*\bname="{re.escape(resource)}"[^>]*>(.*?)</string>',
+                          candidate.read_text(encoding="utf-8"),
+                          re.DOTALL,
+                      )
+                      if resource_match:
+                          label = resource_match.group(1).strip()
+                          break
+                  else:
+                      return None
+              # Android escapes these inside label and string-resource values.
+              label = re.sub(r"\\(['\"\\])", r"\1", label)
+              label = html.unescape(label)
+              label = re.sub(r"\s+", " ", label).strip()
+              return label or None
+
           fallback_name = (name_match.group(1) if name_match else "Flutter App").replace("_", " ").title()
-          product_name = os.environ["RELEASE_NAME_INPUT"].strip() or fallback_name
+          # Explicit input wins; otherwise the app's own name as Android shows
+          # it, otherwise the pubspec package name. A release must never wear
+          # a template placeholder like "My Flutter App".
+          detected_name = detect_manifest_label()
+          product_name = (
+              os.environ["RELEASE_NAME_INPUT"].strip() or detected_name or fallback_name
+          )
           if not product_name or "\n" in product_name or "\r" in product_name:
               raise SystemExit("release-name must be a non-empty single-line value")
+          name_source = (
+              "release-name input"
+              if os.environ["RELEASE_NAME_INPUT"].strip()
+              else ("android:label" if detected_name else "pubspec name")
+          )
+          print(f"Release product name: {product_name!r} (source: {name_source})")
 
           tag = os.environ["RELEASE_TAG_INPUT"].strip() or f"v{version_name}"
           if (
