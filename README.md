@@ -41,6 +41,9 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.15.0/
 
 Reusable workflow production-এ release tag-এ pin করুন। নতুন release এলে `bump-ref.sh` দিয়ে পুরোনো caller-গুলোর pin update করুন।
 
+A `v*` tag can do that for you: [`bump-consumers.yml`](.github/workflows/bump-consumers.yml) fires on a tag (or by hand) and opens one pull request per project — [`scripts/bump-consumers.sh`](scripts/bump-consumers.sh) discovers every repository that references a reusable workflow here and changes only the `@ref`. It needs a `CONSUMER_TOKEN` secret with push and pull-request access to those repositories; nothing is merged automatically.<br>
+`v*` tag দিলে bump pull request নিজে থেকেই যায়: [`bump-consumers.yml`](.github/workflows/bump-consumers.yml) tag-এ (বা হাতে চালালে) প্রতিটি connected project-এর জন্য একটি pull request খোলে — [`scripts/bump-consumers.sh`](scripts/bump-consumers.sh) এখানকার reusable workflow ব্যবহার করা repository খুঁজে শুধু `@ref` বদলায়। এর জন্য ওই repository-গুলোতে push ও PR খোলার অনুমতি দেওয়া `CONSUMER_TOKEN` secret লাগে; কোনো PR নিজে থেকে merge হয় না।
+
 ## Fast widget-test diagnostics / দ্রুত Widget-test debug
 
 The focused runner uses `flutter test` in debug mode—no Android emulator. It captures `RenderFlex overflowed` and similar errors in the run summary and uploads the full console log as `flutter-widget-test-log`.<br>

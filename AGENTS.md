@@ -22,11 +22,12 @@ git commit -am "fix(scope): what changed" && git push origin main
 ```
 
 No feature branch. No pull request. No waiting. **Nothing in this repository
-triggers on `push`, `pull_request` or tags**: six workflows are `workflow_call`
+triggers on a plain `push` or `pull_request`**: six workflows are `workflow_call`
 (they run only when a consumer project calls them), one is a weekly `schedule`,
-and the rest are `workflow_dispatch` (manual). So a push to `main` starts
-nothing — waiting for a run that was never queued is the most expensive mistake
-available here.
+one runs on `v*` tags (`bump-consumers.yml`, which opens the pin-bump pull
+requests in consumer projects), and the rest are `workflow_dispatch` (manual). So
+a push to `main` starts nothing — waiting for a run that was never queued is the
+most expensive mistake available here.
 
 ---
 
@@ -120,9 +121,10 @@ the deliberate act.** Concretely:
 - A **breaking** change (removing/renaming a workflow input, a required secret,
   a permission) → still lands on `main`, but say so loudly: `feat!:`/`fix!:` in
   the commit, a paragraph in the body, and tell the human a major tag is due.
-- Never push a `v*` tag yourself. Nothing in *this* repository fires on a tag,
-  but a tag is the version every project will pin — a public promise. That is
-  the human's call.
+- Never push a `v*` tag yourself. A tag is the version every project will pin —
+  a public promise — and it now also fires `bump-consumers.yml`, which opens a
+  pin-bump pull request in every connected consumer project. That is the
+  human's call.
 
 ---
 
@@ -189,7 +191,9 @@ Claude ইত্যাদি সবই এটা খোঁজে)।
 - **CI ম্যানুয়াল** — push করলে কিছুই চলে না, তাই push করে অপেক্ষা করার মানে
   শুধু সময় নষ্ট। তাই এখানে সরাসরি `main`-এ push করাটাই নিয়ম।
 - **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.15.0` pin করে),
-  কিন্তু নতুন tag দিলে সবার CI একসাথে বদলে যায় — তাই tag আপনার সিদ্ধান্ত।
+  কিন্তু নতুন tag দিলে সবার CI একসাথে বদলে যায় আর connected সব project-এ
+  নিজে থেকেই bump pull request যায় (`bump-consumers.yml`) — তাই tag আপনার
+  সিদ্ধান্ত।
 - **আপনার app project-গুলো** (quizbaaz ইত্যাদি) যে `AGENTS.md` পায় সেটা এই
   ফাইল না — সেটা `agent-pack/AGENTS.template.md` থেকে
   `install-agent-pack.sh` বসায়। পুরোনো project-এ নতুন করে ওই installer

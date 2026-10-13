@@ -1,0 +1,83 @@
+name: Open bump pull requests in connected projects
+
+# A tag in this repository is a release. When one is pushed, every project that
+# pins a reusable workflow from here is moved onto it by a pull request of its
+# own - this repository never pushes to another repository's default branch, so
+# each project's own CI runs on the PR before a human merges it. Also runnable
+# by hand to backfill a release that predates this workflow.
+#
+# Needs a secret: CONSUMER_TOKEN, a token that can push a branch and open a pull
+# request in every connected repository (a fine-grained PAT with
+# Contents: Read and write and Pull requests: Read and write on those
+# repositories). Without it the run stops before it touches anything.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to move consumers to (e.g. v1.15.0). Empty = the tag that triggered this run."
+        required: false
+        type: string
+      repos:
+        description: "Comma-separated repositories to update (empty = discover every connected project)."
+        required: false
+        type: string
+      dry-run:
+        description: "List what would change without pushing or opening pull requests."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two releases in a row must not race over the same branch names and PRs.
+  group: bump-consumers
+  cancel-in-progress: false
+
+jobs:
+  open-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the release tag
+        id: release
+        env:
+          EVENT_TAG: ${{ github.ref_name }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          ref="${INPUT_REF:-}"
+          if [ -z "$ref" ]; then
+            case "$EVENT_TAG" in
+              v*) ref="$EVENT_TAG" ;;
+              *)
+                echo "::error::Dispatch this workflow with 'ref' set to a vX.Y.Z tag."
+                exit 1
+                ;;
+            esac
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Moving connected projects to @$ref"
+
+      - uses: actions/checkout@v5
+
+      - name: Open one pull request per connected project
+        env:
+          GH_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+          TARGET_REF: ${{ steps.release.outputs.ref }}
+          OWNER: ${{ github.repository_owner }}
+          INPUT_REPOS: ${{ inputs.repos }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          args=(--ref "$TARGET_REF" --owner "$OWNER")
+          if [ -n "$INPUT_REPOS" ]; then
+            args+=(--repos "$INPUT_REPOS")
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          bash scripts/bump-consumers.sh "${args[@]}"
