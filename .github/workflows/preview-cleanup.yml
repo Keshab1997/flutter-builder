@@ -166,8 +166,11 @@ jobs:
 
           # Same collision-safe path rule as the preview deploy. Keep old paths
           # for short canonical names; add a digest when normalization is lossy,
-          # the name is long, or it already looks like a generated slug.
-          safe="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
+          # the name is long, or it already looks like a generated slug. LC_ALL=C
+          # here matches the deploy's byte-oriented sanitizer exactly (see
+          # web-preview.yml): with bytewise and textwise sed in the same PR the
+          # cleanup would look under a different directory than the deploy wrote.
+          safe="$(export LC_ALL=C; printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
           [ -n "$safe" ] || safe="branch"
           if [ "$branch" = "$safe" ] && [ "${#safe}" -le 40 ] && \
              ! [[ "$branch" =~ -[0-9a-f]{16}$ ]]; then

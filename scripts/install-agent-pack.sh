@@ -1950,18 +1950,25 @@ if [ "${#conflicts[@]}" -gt 0 ]; then
 fi
 
 mkdir -p -- "$repo_root/tool"
-for name in "${changes[@]}"; do
-  # Write through a temporary file in the destination directory so an
-  # interrupted run cannot leave half a script behind.
-  (
-    temp="$(mktemp "$repo_root/tool/.$name.tmp.XXXXXX")"
-    trap 'rm -f -- "$temp"' EXIT
-    cp -- "$stage/$name" "$temp"
-    chmod 644 "$temp"
-    mv -f -- "$temp" "$repo_root/tool/$name"
-  )
-  say "Installed: tool/$name"
-done
+# Guarded, not `for name in "${changes[@]}"`: when every tool file is already
+# current `changes` is an empty array, and macOS ships bash 3.2, where expanding
+# an empty array under `set -u` aborts with "changes[@]: unbound variable". That
+# is exactly the "only AGENTS.md changed" case, so the update dropped its last
+# line and exited non-zero after writing the file.
+if [ "${#changes[@]}" -gt 0 ]; then
+  for name in "${changes[@]}"; do
+    # Write through a temporary file in the destination directory so an
+    # interrupted run cannot leave half a script behind.
+    (
+      temp="$(mktemp "$repo_root/tool/.$name.tmp.XXXXXX")"
+      trap 'rm -f -- "$temp"' EXIT
+      cp -- "$stage/$name" "$temp"
+      chmod 644 "$temp"
+      mv -f -- "$temp" "$repo_root/tool/$name"
+    )
+    say "Installed: tool/$name"
+  done
+fi
 
 if [ "$agents_action" != "unchanged" ]; then
   say "Installed: AGENTS.md ($agents_action)"

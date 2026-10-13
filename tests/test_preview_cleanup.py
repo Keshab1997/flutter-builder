@@ -9,6 +9,7 @@ third-party modules required.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shlex
 import subprocess
@@ -58,11 +59,17 @@ def slug(expression: str, branch: str) -> str:
         f" | tr '[:upper:]' '[:lower:]'"
         f" | sed -E {shlex.quote(expression)}"
     )
+    # The workflows run on a C-locale runner and pin LC_ALL=C themselves; a
+    # developer's macOS shell is UTF-8, where BSD sed treats a non-ASCII branch
+    # name differently and this guard would fail locally but not in CI. Mirror
+    # the runner so the test measures the real thing on every machine.
+    env = {**os.environ, "LC_ALL": "C"}
     result = subprocess.run(
         ["bash", "-c", script],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     safe = result.stdout or "branch"
     if branch == safe and len(safe) <= 40 and not re.search(
@@ -104,6 +111,10 @@ class PreviewCleanupTests(unittest.TestCase):
             self.assertIn("sha256sum | cut -c1-16", text, path)
             self.assertIn('[ "${#safe}" -le 40 ]', text, path)
             self.assertIn("-[0-9a-f]{16}$", text, path)
+            # The sanitizer must not depend on the runner's locale: without this
+            # pin, deploy (GNU sed) and cleanup (whatever the next image ships)
+            # can disagree on non-ASCII branch names.
+            self.assertIn("LC_ALL=C", text, path)
 
     def test_branch_names_slugify_to_the_published_directory(self) -> None:
         expression = sed_expressions(DEPLOY)[0]

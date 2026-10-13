@@ -140,8 +140,11 @@ jobs:
 
           # Branch names can contain characters that do not belong in a URL
           # path (and pull/<n>/merge refs appear in some events); sanitize to
-          # [a-z0-9-].
-          safe="$(printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
+          # [a-z0-9-]. LC_ALL=C pins the sanitizer to bytes: under a UTF-8
+          # locale GNU sed and macOS's BSD sed disagree on non-ASCII names,
+          # which is how deploy and cleanup could publish/delete two different
+          # directories for one branch.
+          safe="$(export LC_ALL=C; printf '%s' "$REF_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's#[^a-z0-9-]+#-#g; s#^-+##; s#-+$##')"
           [ -n "$safe" ] || safe="branch"
 
           # Keep existing URLs for simple names. Lossy normalization (slash,
