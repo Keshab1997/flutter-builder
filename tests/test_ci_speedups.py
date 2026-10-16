@@ -48,6 +48,18 @@ class ReusableWorkflowTests(unittest.TestCase):
             self.assertIn("inputs.skip-draft-prs == false", head,
                           f"{job} ignores an explicit skip-draft-prs: false")
 
+    def test_no_workflow_mixes_two_versions_of_one_action(self) -> None:
+        """One stray `@v4` next to a dozen `@v5` is drift, not a decision."""
+        pattern = re.compile(r"uses:\s*([\w.-]+/[\w.-]+)@([\w.-]+)")
+        workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        self.assertTrue(workflows)
+        for path in workflows:
+            seen: dict[str, set[str]] = {}
+            for action, version in pattern.findall(path.read_text(encoding="utf-8")):
+                seen.setdefault(action, set()).add(version)
+            mixed = {a: sorted(v) for a, v in seen.items() if len(v) > 1}
+            self.assertEqual(mixed, {}, f"{path.name} mixes action versions: {mixed}")
+
     def test_matrix_jobs_keep_their_own_condition(self) -> None:
         for job in ("prepare-matrix", "matrix-validate"):
             head = re.search(rf"^  {job}:\n(?P<body>(?:    .*\n|\n)*)",
