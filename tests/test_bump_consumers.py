@@ -161,7 +161,7 @@ class InvocationTests(unittest.TestCase):
             env = {k: v for k, v in os.environ.items()
                    if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
             env["PATH"] = f"{tmp}:{env['PATH']}"
-            result = run("--ref", "v1.15.1", env=env)
+            result = run("--ref", "v1.15.2", env=env)
             self.assertEqual(result.returncode, 1)
             self.assertIn("GH_TOKEN", result.stderr)
             self.assertFalse(marker.exists(),

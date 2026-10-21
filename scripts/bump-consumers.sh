@@ -16,9 +16,9 @@
 # token never lands in git.
 #
 # Usage:
-#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.1
-#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.1 --dry-run
-#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.1 --repos app-a,app-b
+#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.2
+#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.2 --dry-run
+#   GH_TOKEN=... bash scripts/bump-consumers.sh --ref v1.15.2 --repos app-a,app-b
 set -euo pipefail
 
 REUSABLE_PREFIX='Keshab1997/flutter-builder/.github/workflows/'
@@ -38,7 +38,7 @@ usage() {
 Move every connected project onto a new flutter-builder tag, as a pull request.
 
 Options:
-  --ref REF          New pin: a version tag (e.g. v1.15.1) or a 40-character
+  --ref REF          New pin: a version tag (e.g. v1.15.2) or a 40-character
                      commit SHA. Required.
   --owner OWNER      GitHub user or organisation that owns the projects
                      (default: $GITHUB_REPOSITORY_OWNER, else Keshab1997).
@@ -79,7 +79,7 @@ done
 # name or expression can end up inside a consumer's workflow file.
 if [[ ! "$ref" =~ ^v[0-9]+(\.[0-9]+){1,2}(-[A-Za-z0-9][A-Za-z0-9.-]*)?$ &&
       ! "$ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-  fail "Invalid --ref '$ref'. Use a version tag (e.g. v1.15.1) or a 40-character commit SHA."
+  fail "Invalid --ref '$ref'. Use a version tag (e.g. v1.15.2) or a 40-character commit SHA."
 fi
 
 command -v gh  >/dev/null 2>&1 || fail "GitHub CLI (gh) is required."
