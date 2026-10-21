@@ -9,6 +9,12 @@ a session: everything here exists to keep the work moving without burning CI.
 This repository runs CI **only when the human dispatches it** (Actions → *Flutter
 CI* → Run workflow). Nothing runs on a push. So:
 
+> **Name things as the project actually has them.** The workflow names in this
+> file are the pack's defaults; a project may hand-roll its gates instead of
+> copying the examples. Read `.github/workflows/` once per session and quote the
+> real names — dispatching a workflow that does not exist wastes the human's
+> turn, and assuming one covers your change is how a batch ships unchecked.
+
 - Work lands on `main` **directly** — no feature branch, no pull request.
 - Do **not** wait for a run after pushing. Nothing started; waiting only wastes
   time.
@@ -170,11 +176,23 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
 | You ask the human to run CI | CI once, for the whole batch |
 | `flutter analyze` / `flutter test` (via flutter-bootstrap) | nothing on GitHub — 40 s to install once per session, then seconds to minutes |
 | `see_screen.py` | the UI-screenshots workflow, once per call |
+| a workflow with a `paths:` filter that your change misses | **nothing** — see below |
+
+A project's Dart job is often path-filtered (e.g. `paths: lib/features/x/**`)
+so that a small batch does not spend a run. The trap: a change *outside* those
+paths starts **no run at all**, and a green board afterwards means "nothing
+was checked", not "nothing broke". When the diff is even slightly risky and no
+workflow matches it, run the local pair once (`flutter analyze` + the relevant
+`flutter test`) — that is the only check that diff will ever get.
 
 If you want a run right now, do **not** retrigger it with an empty commit — use
 *Actions → Run workflow* (or ask the human to).
 
 ## CI map
+
+The pack's standard set, for a project that copied `examples/project-workflows/`.
+Confirm the list against `.github/workflows/` before quoting it — a project may
+have fewer (or differently named) workflows:
 
 | Workflow | Runs when | What it does |
 |---|---|---|
