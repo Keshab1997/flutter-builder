@@ -1268,6 +1268,44 @@ jobs:
               echo "Release notes found in ${NOTES_DIR}:"
               ls -1 "${NOTES_DIR}"
             fi
+            # Play rejects a note longer than 500 characters, and it answers
+            # that *after* the AAB has been accepted - so a note a few
+            # characters too long costs a whole build and its version code.
+            # Count in characters, never bytes: Bengali is three bytes per
+            # character in UTF-8, so a byte count would fail a note at roughly
+            # 170 characters. The heredoc is quoted, so nothing here expands.
+            python3 - "${NOTES_DIR}" <<'PLAY_NOTES'
+          import pathlib
+          import sys
+
+          LIMIT = 500
+          notes_dir = pathlib.Path(sys.argv[1])
+          over = []
+
+          for path in sorted(notes_dir.iterdir()):
+              if not path.is_file():
+                  continue
+              if not path.name.startswith("whatsnew-"):
+                  print(f"::warning::{path.name} is not named whatsnew-<locale>; Play will ignore it.")
+                  continue
+              # Trailing whitespace is not part of what Play displays, and an editor's
+              # final newline must not be the difference between a pass and a failure.
+              length = len(path.read_text(encoding="utf-8").rstrip())
+              print(f"{path.name}: {length}/{LIMIT} characters")
+              if length > LIMIT:
+                  over.append((path.name, length))
+                  print(
+                      f"::error::{path.name} is {length} characters; Play allows {LIMIT} "
+                      f"per locale. Trim {length - LIMIT} and commit again."
+                  )
+
+          if over:
+              print(
+                  "Nothing was uploaded: this check runs before the AAB reaches Play, "
+                  "so no version code was spent."
+              )
+              sys.exit(1)
+          PLAY_NOTES
             exit 0
           fi
 

@@ -246,6 +246,62 @@ class PlayNotesTests(unittest.TestCase):
         self.assertIn("whatsnew-en-US", result.stdout)
         self.assertNotIn("::warning::", result.stdout)
 
+    def test_a_note_over_the_limit_fails_before_the_upload(self) -> None:
+        """Play's 500-character cap, caught while it still costs nothing.
+
+        Play refuses a longer note *after* it has taken the AAB, and that
+        spends the version code — so this has to fail on the runner instead.
+        """
+        notes = self.root / "flutter_app/distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-en-US").write_text("x" * 501, encoding="utf-8")
+        result = self.check("flutter_app/distribution/whatsnew")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("501/500", result.stdout)
+        self.assertIn("Play allows 500", result.stdout)
+        self.assertIn("Trim 1", result.stdout)
+        self.assertIn("no version code was spent", result.stdout)
+
+    def test_a_note_exactly_at_the_limit_passes(self) -> None:
+        notes = self.root / "flutter_app/distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-en-US").write_text("x" * 500, encoding="utf-8")
+        result = self.check("flutter_app/distribution/whatsnew")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("500/500", result.stdout)
+
+    def test_the_limit_counts_characters_not_bytes(self) -> None:
+        """A Bengali note is three bytes per character.
+
+        Counting bytes would fail a perfectly legal note at ~170 characters,
+        which is exactly how a 180-character Bengali note looks like 457.
+        """
+        notes = self.root / "flutter_app/distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-bn-BD").write_text("অ" * 450 + "\n", encoding="utf-8")
+        result = self.check("flutter_app/distribution/whatsnew")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("450/500", result.stdout)
+        # 450 characters, 1350 bytes: the two numbers must not be confused.
+        self.assertNotIn("1350", result.stdout)
+
+    def test_a_trailing_newline_does_not_push_a_note_over(self) -> None:
+        notes = self.root / "flutter_app/distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-en-US").write_text("x" * 500 + "\n", encoding="utf-8")
+        result = self.check("flutter_app/distribution/whatsnew")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_file_that_is_not_named_whatsnew_warns(self) -> None:
+        """Play silently ignores it, so the run must say so out loud."""
+        notes = self.root / "flutter_app/distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-en-US").write_text("notes\n", encoding="utf-8")
+        (notes / "release-notes.txt").write_text("notes\n", encoding="utf-8")
+        result = self.check("flutter_app/distribution/whatsnew")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("::warning::release-notes.txt", result.stdout)
+
 
 class ExampleCallerTests(unittest.TestCase):
     """The copied example has to match what the builder now expects."""
