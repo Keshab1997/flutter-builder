@@ -82,6 +82,15 @@ Replace `MyApp` with the app root or the affected screen, and add any required m
 - **Screenshots:** web build only—not an Android emulator. The reusable workflow can post/update a comment on eligible same-repo PR runs; the supplied caller is manual. Platform-only plugins may not render.<br>
   **Screenshot:** শুধু web build—Android emulator নয়। উপযুক্ত same-repo PR run-এ reusable workflow comment দিতে/update করতে পারে; দেওয়া caller manual। Web-এ চলে না এমন plugin render নাও হতে পারে।
 
+**Local screenshots (no CI, no device):** `tool/local_screenshots.py` renders the screens listed in `tool/screenshots/shot_registry.dart` to PNGs with `flutter test` — about a second per screen, offline, nothing on GitHub. The registry is yours: list the screens, the app's theme, its fonts and its native mocks. The framework and the runner beside it belong to the pack and are replaced when it updates; the registry never is.<br>
+**Local screenshot (CI বা device ছাড়া):** `tool/local_screenshots.py` `tool/screenshots/shot_registry.dart`-এ থাকা screen-গুলো `flutter test` দিয়ে PNG বানায় — প্রতি screen-এ প্রায় এক সেকেন্ড, offline, GitHub-এ কিছুই খরচ হয় না। registry ফাইলটা আপনার — কোন screen, কোন theme, কোন font, কোন native mock লিখবেন সেখানে। পাশের framework আর runner pack-এর, update-এ বদলায়; registry কখনো বদলায় না।
+
+```bash
+python3 tool/local_screenshots.py --list               # the shots this project has
+python3 tool/local_screenshots.py --shot home,settings # render some
+python3 tool/local_screenshots.py                      # render all
+```
+
 Measure recent preview times (read-only):
 
 ```bash
@@ -110,6 +119,8 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.15.2/
 | `tool/preflight.py` | Catch common Dart issues before pushing. / Push-এর আগে সাধারণ Dart সমস্যা ধরে। |
 | `tool/ci_watch.py` | Read Actions results and failing logs. / Actions result ও fail log পড়ে। |
 | `tool/agent_loop.py` | Preflight, secret guard, commit and push in one loop. / এক loop-এ preflight, secret guard, commit ও push। |
+| `tool/local_screenshots.py` | Render any screen to a PNG locally, in about a second. / যেকোনো screen-কে locally PNG বানায়, প্রায় এক সেকেন্ডে। |
+| `tool/screenshots/` | The harness: `shot_framework.dart` + `shot_runner_test.dart` (pack) and **your** `shot_registry.dart`. / Harness: framework ও runner pack-এর, `shot_registry.dart` আপনার। |
 | `scripts/doctor.sh` | Check app/release configuration. / App ও release configuration যাচাই করে। |
 
 More details / আরও তথ্য: [workflow examples](examples/project-workflows/), [secrets guide](docs/AGENT_SECRETS_SETUP.md), [preview timing script](scripts/preview_timing.py).<br>

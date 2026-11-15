@@ -71,6 +71,20 @@ class PayloadParityTests(unittest.TestCase):
             (PACK / "see_screen.py").read_text(encoding="utf-8"),
         )
 
+    def test_embedded_screenshot_harness_matches_agent_pack(self) -> None:
+        """The harness ships as four files; three of them are the pack's."""
+        for name, token in (
+            ("shot_framework.dart", "AGENT_PACK_SHOT_FRAMEWORK_DART_EOF"),
+            ("shot_runner_test.dart", "AGENT_PACK_SHOT_RUNNER_TEST_DART_EOF"),
+            ("shot_registry.example.dart", "AGENT_PACK_SHOT_REGISTRY_DART_EOF"),
+            ("local_screenshots.py", "AGENT_PACK_LOCAL_SCREENSHOTS_PY_EOF"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    extract_payload(token),
+                    (PACK / name).read_text(encoding="utf-8"),
+                )
+
     def test_embedded_agents_template_matches_agent_pack(self) -> None:
         self.assertEqual(
             extract_payload("AGENT_PACK_AGENTS_MD_EOF"),
@@ -149,8 +163,40 @@ class InstallerTests(unittest.TestCase):
             (self.repo / "tool/see_screen.py").read_text(encoding="utf-8"),
             (PACK / "see_screen.py").read_text(encoding="utf-8"),
         )
+        for name, source in (
+            ("tool/local_screenshots.py", "local_screenshots.py"),
+            ("tool/screenshots/shot_framework.dart", "shot_framework.dart"),
+            ("tool/screenshots/shot_runner_test.dart", "shot_runner_test.dart"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    (self.repo / name).read_text(encoding="utf-8"),
+                    (PACK / source).read_text(encoding="utf-8"),
+                )
+        # The registry is a template the project then owns, so it is installed
+        # from the example - and only when it is absent.
+        self.assertEqual(
+            (self.repo / "tool/screenshots/shot_registry.dart").read_text(encoding="utf-8"),
+            (PACK / "shot_registry.example.dart").read_text(encoding="utf-8"),
+        )
+        # `--list` must work before any Flutter SDK exists and must not treat the
+        # template's commented-out example as a real shot.
+        listed = subprocess.run(
+            ["python3", "tool/local_screenshots.py", "--list"], cwd=self.repo,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
+        self.assertIn("no shots yet", listed.stdout)
+        shot_help = subprocess.run(
+            ["python3", "tool/local_screenshots.py", "--help"], cwd=self.repo,
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(shot_help.returncode, 0, shot_help.stderr)
+        self.assertIn("--shot", shot_help.stdout)
         agents = self.agents_md()
         self.assertTrue(agents.startswith("# AGENTS.md — demo_app"), agents[:80])
+        # The playbook has to tell the agent the fast way to see a screen.
+        self.assertIn("tool/local_screenshots.py", agents)
         self.assertEqual(agents.count(HED), 1)
         self.assertEqual(agents.count(TAIL), 1)
         self.assertIn("Project notes", agents)
@@ -183,21 +229,50 @@ class InstallerTests(unittest.TestCase):
     def test_rerun_is_idempotent_and_changes_nothing(self) -> None:
         self.flutter_app()
         self.assert_success(self.run_installer())
+        watched = ("tool/preflight.py", "tool/ci_watch.py", "tool/agent_loop.py",
+                   "tool/local_screenshots.py", "AGENTS.md",
+                   "tool/screenshots/shot_framework.dart",
+                   "tool/screenshots/shot_runner_test.dart",
+                   "tool/screenshots/shot_registry.dart")
         before = {
-            name: (self.repo / name).read_text(encoding="utf-8")
-            for name in ("tool/preflight.py", "tool/ci_watch.py",
-                         "tool/agent_loop.py", "AGENTS.md")
+            name: (self.repo / name).read_text(encoding="utf-8") for name in watched
         }
         second = self.run_installer()
         self.assert_success(second)
         self.assertIn("already installed; nothing changed", second.stdout)
         after = {
-            name: (self.repo / name).read_text(encoding="utf-8")
-            for name in ("tool/preflight.py", "tool/ci_watch.py",
-                         "tool/agent_loop.py", "AGENTS.md")
+            name: (self.repo / name).read_text(encoding="utf-8") for name in watched
         }
         self.assertEqual(before, after)
         self.assertFalse((self.repo / ".agent-pack-backups").exists())
+
+    def test_the_projects_shot_registry_is_never_replaced(self) -> None:
+        """shot_registry.dart is the one file in the harness the app owns.
+
+        A force install replaces the pack's files and must still leave a
+        hand-written list of screens alone: silently deleting it would take the
+        project's screenshots with it."""
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        registry = self.repo / "tool/screenshots/shot_registry.dart"
+        mine = registry.read_text(encoding="utf-8") + "// my own shots\n"
+        registry.write_text(mine, encoding="utf-8")
+        framework = self.repo / "tool/screenshots/shot_framework.dart"
+        framework.write_text("// drift\n", encoding="utf-8")
+
+        forced = self.run_installer("--force")
+        self.assert_success(forced)
+        self.assertIn("Kept as-is (yours): tool/screenshots/shot_registry.dart",
+                      forced.stdout)
+        self.assertEqual(registry.read_text(encoding="utf-8"), mine)
+        self.assertEqual(
+            framework.read_text(encoding="utf-8"),
+            (PACK / "shot_framework.dart").read_text(encoding="utf-8"),
+        )
+        # And the replaced file was backed up, not lost.
+        backups = list((self.repo / ".agent-pack-backups").glob("*/shot_framework.dart"))
+        self.assertEqual(len(backups), 1, backups)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "// drift\n")
 
     def test_piped_bash_installs_the_same_files(self) -> None:
         self.flutter_app()

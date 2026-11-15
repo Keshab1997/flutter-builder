@@ -12,7 +12,7 @@ Edit `agent-pack/`, then run this:
     python3 scripts/sync-agent-pack.py           # rewrite the embedded payload
     python3 scripts/sync-agent-pack.py --check   # exit 1 when out of sync (CI-safe)
 
-Only the bodies of the five heredocs change; nothing else in the installer is
+Only the bodies of the nine heredocs change; nothing else in the installer is
 touched.
 """
 from __future__ import annotations
@@ -33,6 +33,10 @@ PAYLOAD = {
     "agent_loop.py": "AGENT_PACK_AGENT_LOOP_PY_EOF",
     "see_screen.py": "AGENT_PACK_SEE_SCREEN_PY_EOF",
     "AGENTS.template.md": "AGENT_PACK_AGENTS_MD_EOF",
+    "shot_framework.dart": "AGENT_PACK_SHOT_FRAMEWORK_DART_EOF",
+    "shot_runner_test.dart": "AGENT_PACK_SHOT_RUNNER_TEST_DART_EOF",
+    "shot_registry.example.dart": "AGENT_PACK_SHOT_REGISTRY_DART_EOF",
+    "local_screenshots.py": "AGENT_PACK_LOCAL_SCREENSHOTS_PY_EOF",
 }
 
 

@@ -17,6 +17,18 @@
 #                        guard, commit, push, watch. Refuses to commit on the
 #                        default branch or to stage a credential, so an agent
 #                        cannot skip a step by accident.
+#   tool/local_screenshots.py
+#                        Photographs a screen: renders it to a PNG with
+#                        `flutter test`, offline, about a second per screen. No
+#                        CI run, no device, no emulator.
+#   tool/screenshots/shot_framework.dart, shot_runner_test.dart
+#                        The harness the CLI drives: a project-agnostic frame
+#                        plus the golden runner test. Replaced when the pack
+#                        updates, so fixes belong upstream.
+#   tool/screenshots/shot_registry.dart
+#                        YOUR file: which screens to photograph and how to
+#                        dress them (theme, fonts, native mocks). Written once,
+#                        then never replaced - not even with --force.
 #   AGENTS.md            A playbook for AI agents: the one-change/one-push
 #                        loop, the CI map, how to read CI cheaply, and the
 #                        rules to keep. The text between the
@@ -37,16 +49,18 @@ fail() { printf '[agent-pack] ERROR: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'HELP'
 Install the flutter-builder agent pack (tool/preflight.py, tool/ci_watch.py,
-tool/agent_loop.py, tool/see_screen.py and a managed AGENTS.md block) into a Flutter repository.
-No Flutter SDK needed.
+tool/agent_loop.py, tool/see_screen.py, tool/local_screenshots.py, the
+tool/screenshots/ harness and a managed AGENTS.md block) into a Flutter
+repository. No Flutter SDK needed to install.
 
 Run from anywhere inside the repository:
   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.15.2/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything
-  --force     Replace any differing tool/*.py from the pack
-              (originals are backed up first)
+  --force     Replace any differing tool/*.py or tool/screenshots/*.dart from
+              the pack (originals are backed up first). Your
+              tool/screenshots/shot_registry.dart is never replaced.
   -h, --help  Show this help
 
 AGENTS.md is always merged, never replaced: the managed block between the
@@ -95,9 +109,15 @@ esac
 [ ! -e "$repo_root/AGENTS.md" ] || [ -f "$repo_root/AGENTS.md" ] || fail "AGENTS.md exists but is not a regular file."
 [ ! -L "$repo_root/tool" ] || fail "tool/ is a symlink; refusing to write through it."
 [ ! -e "$repo_root/tool" ] || [ -d "$repo_root/tool" ] || fail "tool/ exists but is not a directory."
-for name in preflight.py ci_watch.py agent_loop.py see_screen.py; do
+for name in preflight.py ci_watch.py agent_loop.py see_screen.py local_screenshots.py; do
   [ ! -L "$repo_root/tool/$name" ] || fail "tool/$name is a symlink; refusing to replace it."
   [ ! -e "$repo_root/tool/$name" ] || [ -f "$repo_root/tool/$name" ] || fail "tool/$name exists but is not a regular file."
+done
+[ ! -L "$repo_root/tool/screenshots" ] || fail "tool/screenshots is a symlink; refusing to write through it."
+[ ! -e "$repo_root/tool/screenshots" ] || [ -d "$repo_root/tool/screenshots" ] || fail "tool/screenshots exists but is not a directory."
+for name in shot_framework.dart shot_runner_test.dart shot_registry.dart; do
+  [ ! -L "$repo_root/tool/screenshots/$name" ] || fail "tool/screenshots/$name is a symlink; refusing to write through it."
+  [ ! -e "$repo_root/tool/screenshots/$name" ] || [ -f "$repo_root/tool/screenshots/$name" ] || fail "tool/screenshots/$name exists but is not a regular file."
 done
 
 say "Repository: $repo_root"
@@ -1629,6 +1649,7 @@ python3 tool/agent_loop.py -m "fix(scope): what changed"   # preflight + commit 
 | `python3 tool/preflight.py` | ~1 s | every change, before every push |
 | `flutter test test/<file>_test.dart` (via flutter-bootstrap) | 40 s once per session, then seconds | the Dart change that file covers |
 | `flutter analyze` or the full `flutter test` | ~20 s / 1–3 min | shared surfaces, risky diffs, or when the human asks |
+| `python3 tool/local_screenshots.py --shot <name>` | one `flutter test` run, ~1 s per screen, no CI | every widget change you want to see |
 | `python3 tool/see_screen.py` | one CI run | before and after a UI change |
 | The human's CI run | the human's attention + a runner | once per finished batch — never per edit |
 
@@ -1712,7 +1733,30 @@ no pull request. Exit codes: `0` committed/pushed, `1` the push failed,
 
 ## Seeing a screen — look, do not guess
 
-You cannot run the app, but you can *see* it. `tool/see_screen.py` asks CI to
+You cannot run the app, but you can *see* it, and the fast way costs nothing on
+GitHub: `tool/local_screenshots.py` renders the screens listed in
+`tool/screenshots/shot_registry.dart` to PNGs with `flutter test`, offline.
+
+```bash
+python3 tool/local_screenshots.py --list               # the shots this project has
+python3 tool/local_screenshots.py --shot home          # one
+python3 tool/local_screenshots.py --shot home,settings # several, one run
+python3 tool/local_screenshots.py                      # all of them
+```
+
+* `shot_registry.dart` is **your** file: it says which screens to photograph and
+  how to dress them (the app's theme, its fonts, its native channel answered as
+  "nothing granted yet", any local store initialised). Add a shot when you add a
+  screen; keep it small and honest. The framework and the runner next to it are
+  the pack's and are replaced when the pack updates — a fix belongs upstream.
+* The pictures land in `.agent-screens/` (git-ignored). They are **evidence, not
+  fixtures**: never read one back as a test input, never commit one, and never
+  let CI pay for rendering.
+* A shot that renders as a red error page is telling you the truth: a missing
+  mock, a missing font, a missing `setUp`. Fix the shot, not the screenshot tool.
+
+When the screen you need is behind a login, a plugin or several taps, or when
+you want the pushed build rather than the test build, `tool/see_screen.py` asks CI to
 build the app for web and photograph the routes you name, waits for the run,
 downloads the images and prints their paths. Then open them — with your image
 tool, not your imagination:
@@ -1727,7 +1771,8 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
   like now. After: see what your change did. A green CI says the code compiles;
   only the picture says the layout is right.
 * This is the one thing that does start a run — it dispatches the UI-screenshots
-  workflow itself, so use it deliberately, not on every edit.
+  workflow itself, so use it deliberately, not on every edit. For a screen you
+  can render in a test, `tool/local_screenshots.py` is faster and free.
 * The routes are the app's own (`/settings`, `/profile`) — the same names the
   app navigates to. A screen behind a login or several taps cannot be reached
   this way; ask the human for a screenshot of that one instead.
@@ -1760,6 +1805,7 @@ python3 tool/see_screen.py --route /settings --wait-ms 12000   # slow first fram
 | Docs/Markdown/release-note/`.github/`-only push | nothing |
 | You ask the human to run CI | CI once, for the whole batch |
 | `flutter analyze` / `flutter test` (via flutter-bootstrap) | nothing on GitHub — 40 s to install once per session, then seconds to minutes |
+| `local_screenshots.py` | nothing on GitHub — local `flutter test` only |
 | `see_screen.py` | the UI-screenshots workflow, once per call |
 | a workflow with a `paths:` filter that your change misses | **nothing** — see below |
 
@@ -1846,7 +1892,7 @@ rejects a request that still carries the `Authorization` header
   কিছু বদলালে বা আপনি বললে। প্রতিটা ছোট edit-এর পিছনে পুরো suite চালানো লাগে না।
 - **সরাসরি `main`-এ push** — branch নেই, PR নেই। push করলে CI নিজে থেকে চলে না।
 - **CI চালানোর বোতাম আপনারই** — একটা batch শেষ হলে একবার চালালেই যথেষ্ট।
-- **UI বদলালে ছবি দেখে যাচাই** — `python3 tool/see_screen.py`।
+- **UI বদলালে ছবি দেখে যাচাই** — আগে `python3 tool/local_screenshots.py --shot <নাম>` (ফ্রি, সেকেন্ডে), দরকার হলে `python3 tool/see_screen.py`।
 - **agent আগে অনুমতি নেবে** — tag/release, secrets, store metadata, বা যা
   ফিরিয়ে আনা যায় না এমন কিছুর আগে।
 - এই ব্লকটা `install-agent-pack.sh` চালালে নিজে থেকেই update হয়; নিচের
@@ -1869,9 +1915,585 @@ down here is never touched).
   Play Console steps, manual checks …)_
 AGENT_PACK_AGENTS_MD_EOF
 
+# The screenshot harness. Four files, and only three of them are ours.
+cat > "$stage/shot_framework.dart" <<'AGENT_PACK_SHOT_FRAMEWORK_DART_EOF'
+// ============================================================================
+// shim: part of the flutter-builder agent pack. DO NOT EDIT IN A PROJECT.
+//
+// Installed by scripts/install-agent-pack.sh into tool/screenshots/. The
+// canonical copy lives in Keshab1997/flutter-builder (agent-pack/); a local
+// edit is overwritten the next time the installer runs with --force, and the
+// pack's own tests compare this file byte for byte with that copy.
+//
+// Everything a project has to say about itself lives in shot_registry.dart
+// next door: this file must compile against any Flutter app, which is why it
+// imports nothing from the app, no state-management package and no theme class.
+// ============================================================================
+//
+// Render screens to PNGs, in the test harness, with the app's real theme and
+// real fonts - no device, no CI run, no network.
+//
+// Why it exists next to tool/see_screen.py: that one asks CI to build the web
+// app and photograph *routes*. It costs a run and it cannot reach a screen you
+// have to tap into (any pushed detail screen). This renders the widget itself,
+// so it takes about a second and photographs exactly what you named.
+//
+// The PNGs are throwaway evidence: they land in .agent-screens/local/
+// (git-ignored) and nothing reads them back as a test fixture.
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// One screen, rendered the way a phone would render it.
+class Shot {
+  const Shot({
+    required this.name,
+    required this.build,
+    this.preferences = const <String, Object>{},
+    this.logicalSize = const Size(390, 844),
+    this.dpr = 2,
+    this.dark = true,
+    this.textScale = 1,
+  });
+
+  /// What `--shot <name>` takes, and the PNG's file name. Kebab-case.
+  final String name;
+  final Widget Function() build;
+
+  /// Values seeded into SharedPreferences before the pump - this is how a shot
+  /// can show a Bengali session or a three-draft setting without anybody
+  /// tapping anything.
+  final Map<String, Object> preferences;
+
+  /// Logical size. 390x844 is a modern phone; use 320x... to see what a narrow
+  /// screen does to a layout, because that is where layouts break.
+  final Size logicalSize;
+  final double dpr;
+  final bool dark;
+  final double textScale;
+
+  String get sizeLabel =>
+      '${logicalSize.width.toInt()}x${logicalSize.height.toInt()}@${dpr}x';
+}
+
+/// Everything the framework needs to know about the app it is rendering.
+///
+/// This is the whole contract with a project, and it is deliberately small:
+/// a theme, a wrapper, font files, and the mocks a widget test needs. A
+/// screenshot taken in a bare Material theme is a screenshot of a different
+/// app, so [theme] is required and there is no default.
+class ShotEnv {
+  const ShotEnv({
+    required this.app,
+    this.wrap = _noWrap,
+    this.fontAssets = const <String, String>{},
+    this.bridgeChannel,
+    this.bridgeAnswers = const <String, Object?>{},
+    this.seedPreferences,
+    this.setUpAll,
+    this.materialIconsFamily = 'MaterialIcons',
+  });
+
+  /// Builds the widget that goes above the screen: the app's own MaterialApp
+  /// (or CupertinoApp), with its real theme and locale.
+  ///
+  /// It is a callback rather than a `ThemeData` field on purpose. Flutter has
+  /// started moving material out of the framework into `package:material_ui`,
+  /// where `ThemeData` is a *different type* than the one in
+  /// `package:flutter/material.dart` - so a framework that named either import
+  /// would fail to compile in half the projects that install it. Handing the
+  /// shell back to the project keeps this file free of both, and lets a project
+  /// add a locale, a golden-ratio fix or a ProviderScope without touching the,
+  /// pack.
+  final Widget Function(Shot shot, Widget home) app;
+
+  /// ProviderScope, MultiBlocProvider, GetIt bootstrap - whatever the app puts
+  /// above its widgets in main(). Identity by default, when there is nothing.
+  final Widget Function(Widget child) wrap;
+
+  /// Font family name -> asset path, e.g. {'Inter': 'assets/fonts/Inter.ttf'}.
+  /// Without these every glyph renders as a solid box and the picture is worse
+  /// than useless: it looks like a layout bug.
+  final Map<String, String> fontAssets;
+
+  /// The MethodChannel the app talks to its native side on, mocked for the
+  /// duration of the run. Null means the app has no such channel.
+  final String? bridgeChannel;
+
+  /// method name -> the answer a "nothing is set up yet" install would give.
+  /// A shot should show the honest empty state, not a red screen.
+  final Map<String, Object?> bridgeAnswers;
+
+  /// How to seed SharedPreferences from [Shot.preferences].
+  ///
+  /// The pack does not import shared_preferences: an app without that
+  /// dependency would fail to compile, and the pack has to fit every project.
+  /// Pass `(values) => SharedPreferences.setMockInitialValues(values)` (add the
+  /// `// ignore: invalid_use_of_visible_for_testing_member`) or seed your own
+  /// store instead. Leave it null only if no shot declares preferences.
+  final Future<void> Function(Map<String, Object> values)? seedPreferences;
+
+  /// Runs once before every shot: Hive.init, temp directories, fake clocks.
+  /// A widget that opens a local box throws without this, and the shot would be
+  /// a red error page instead of a screen.
+  final Future<void> Function()? setUpAll;
+
+  /// The icon font family, which ships with the SDK rather than the repo.
+  final String materialIconsFamily;
+
+  static Widget _noWrap(Widget child) => child;
+}
+
+/// The two flags, read as strings.
+///
+/// `bool.fromEnvironment` only understands "true"/"false", so the documented
+/// `--dart-define=SHOTS=1` would leave the whole tool silently off. Strings do
+/// not have that trap.
+const String _shotsFlag = String.fromEnvironment('SHOTS');
+const String requestedShots = String.fromEnvironment('SHOT');
+
+/// No define, no rendering: a direct run of the runner cannot start writing
+/// PNGs by accident.
+const bool shotsEnabled = _shotsFlag == '1' || _shotsFlag == 'true';
+
+/// Where the PNGs go. Two spellings of one directory on purpose: Flutter
+/// resolves a golden path against *the test file's* directory, while dart:io
+/// creates directories against the *package root*.
+const String goldenDir = '../../.agent-screens/local';
+const String outputDir = '.agent-screens/local';
+
+/// The widget the golden is taken of: everything the app drew, nothing else.
+const ValueKey<String> shotRootKey = ValueKey<String>('agent-pack-shot-root');
+
+/// `--dart-define=SHOT=a,b` selects; empty means every shot.
+List<Shot> selectShots(List<Shot> shots, String requested) {
+  final wanted = requested
+      .split(',')
+      .map((name) => name.trim())
+      .where((name) => name.isNotEmpty)
+      .toSet();
+  if (wanted.isEmpty) return shots;
+  return shots.where((shot) => wanted.contains(shot.name)).toList();
+}
+
+Future<void> _loadAppFonts(ShotEnv env) async {
+  for (final entry in env.fontAssets.entries) {
+    final file = File(entry.value);
+    if (!file.existsSync()) {
+      throw StateError(
+        'shot fonts: "${entry.key}" points at ${entry.value}, which does not '
+        'exist. Fix fontAssets in shot_registry.dart.',
+      );
+    }
+    final bytes = file.readAsBytesSync();
+    final loader = FontLoader(entry.key)
+      ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
+    await loader.load();
+  }
+
+  // Icons are a font too, and this one ships with the SDK, not the repo.
+  final sdk = Platform.environment['FLUTTER_ROOT'];
+  final candidates = <String>[
+    if (sdk != null && sdk.isNotEmpty)
+      '$sdk/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    '/var/tmp/flutter/bin/cache/artifacts/material_fonts/'
+        'MaterialIcons-Regular.otf',
+  ];
+  final icons = candidates.map(File.new).where((f) => f.existsSync()).toList();
+  if (icons.isEmpty) {
+    throw StateError(
+      'shot fonts: MaterialIcons not found (looked in $candidates). Icons '
+      'would render as boxes, so this stops instead of writing a misleading '
+      'screenshot. Set FLUTTER_ROOT if the SDK lives elsewhere.',
+    );
+  }
+  final bytes = icons.first.readAsBytesSync();
+  final loader = FontLoader(env.materialIconsFamily)
+    ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
+  await loader.load();
+}
+
+void _mockBridge(TestWidgetsFlutterBinding binding, ShotEnv env) {
+  final name = env.bridgeChannel;
+  if (name == null) return;
+  final channel = MethodChannel(name);
+  binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+    call,
+  ) async {
+    return env.bridgeAnswers[call.method];
+  });
+}
+
+/// The whole suite. Call this from the runner; there is nothing else to it.
+void runShotSuite({
+  required List<Shot> shots,
+  required ShotEnv env,
+  String requested = requestedShots,
+  bool enabled = shotsEnabled,
+}) {
+  if (!enabled) {
+    test('screenshot runner is off (pass --dart-define=SHOTS=1)', () {});
+    return;
+  }
+
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  final selected = selectShots(shots, requested);
+
+  setUpAll(() async {
+    await _loadAppFonts(env);
+    _mockBridge(binding, env);
+    await env.setUpAll?.call();
+    Directory(outputDir).createSync(recursive: true);
+  });
+
+  if (selected.isEmpty) {
+    test('no shot matched --dart-define=SHOT=$requested', () {
+      fail(
+        'Nothing matched. Known shots: '
+        '${shots.map((shot) => shot.name).join(', ')}',
+      );
+    });
+    return;
+  }
+
+  for (final shot in selected) {
+    testWidgets('shot: ${shot.name} (${shot.sizeLabel})', (tester) async {
+      final seed = env.seedPreferences;
+      if (seed != null) {
+        await seed(shot.preferences);
+      } else if (shot.preferences.isNotEmpty) {
+        // Fail loudly here rather than let the screen paint a MissingPlugin
+        // red page: a silent empty store looks like a bug in the app.
+        fail(
+          'shot "${shot.name}" declares preferences but ShotEnv.seedPreferences '
+          'is null - nothing was seeded.',
+        );
+      }
+
+      tester.view.physicalSize = Size(
+        shot.logicalSize.width * shot.dpr,
+        shot.logicalSize.height * shot.dpr,
+      );
+      tester.view.devicePixelRatio = shot.dpr;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        env.wrap(
+          MediaQuery(
+            data: MediaQueryData(
+              size: shot.logicalSize,
+              textScaler: TextScaler.linear(shot.textScale),
+              devicePixelRatio: shot.dpr,
+            ),
+            // The boundary is what gets photographed, and its key is what the
+            // golden is asked for: the pack cannot say find.byType(MaterialApp)
+            // without importing material, and it must not import material.
+            child: RepaintBoundary(
+              key: shotRootKey,
+              child: env.app(shot, shot.build()),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Asset images decode on a real event loop, which the fake async of a
+      // widget test never advances. Without this a logo or mascot photographs
+      // as a coloured circle - a picture that lies about the app.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 80)),
+      );
+      await tester.pump();
+
+      // A layout exception is the most valuable thing a screenshot can tell
+      // you, and it is invisible in the pixels. Fail loudly, with the name.
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '${shot.name} threw while rendering',
+      );
+
+      await expectLater(
+        find.byKey(shotRootKey),
+        matchesGoldenFile('$goldenDir/${shot.name}.png'),
+      );
+    });
+  }
+}
+AGENT_PACK_SHOT_FRAMEWORK_DART_EOF
+
+cat > "$stage/shot_runner_test.dart" <<'AGENT_PACK_SHOT_RUNNER_TEST_DART_EOF'
+// ============================================================================
+// shim: part of the flutter-builder agent pack. DO NOT EDIT IN A PROJECT.
+// Canonical copy: Keshab1997/flutter-builder (agent-pack/shot_runner_test.dart).
+// ============================================================================
+//
+// The entry point the CLI runs:
+//
+//     python3 tool/local_screenshots.py --list
+//     python3 tool/local_screenshots.py --shot settings
+//
+// All of the work is in shot_framework.dart; everything specific to this app is
+// in shot_registry.dart. This file is deliberately two imports and four lines,
+// because a project should never need to touch it - and if it does, the next
+// installer run takes the change away.
+//
+// It lives in tool/, not test/, so a plain `flutter test` never discovers it:
+// CI stays as fast as it was and cannot go red because a golden moved.
+import 'shot_framework.dart';
+import 'shot_registry.dart';
+
+void main() {
+  runShotSuite(shots: shots, env: env);
+}
+AGENT_PACK_SHOT_RUNNER_TEST_DART_EOF
+
+cat > "$stage/shot_registry.dart" <<'AGENT_PACK_SHOT_REGISTRY_DART_EOF'
+// The one file in tool/screenshots/ that belongs to THIS project.
+//
+// The installer writes this once, only when it is missing, and never touches it
+// again - everything else in this directory is replaced by the pack. So: edit
+// it freely, commit it, and treat it as app code.
+//
+// It has to compile in a project that has just installed the pack, which is why
+// the shot list starts empty and the env is a placeholder. Fill both in:
+//
+//   1. env - the app's real theme (the same function main() gives MaterialApp),
+//      the font files it ships, the MethodChannel it talks to Kotlin/Java on,
+//      and whatever its widget tests have to initialise first (Hive, a clock).
+//   2. shots - one entry per screen worth looking at, named in kebab-case.
+//
+// A worked example, from a real project:
+//
+//   final ShotEnv env = ShotEnv(
+//     // The app's real shell. Note it is *your* import of Material/Cupertino:
+//     // the pack names neither, because Flutter's material move makes
+//     // package:flutter/material.dart and package:material_ui/material_ui.dart
+//     // different ThemeData types.
+//     app: (shot, home) => MaterialApp(
+//       theme: shot.dark ? AppTheme.dark() : AppTheme.light(),
+//       home: home,
+//     ),
+//     wrap: (child) => ProviderScope(child: child),
+//     fontAssets: const <String, String>{
+//       'Inter': 'assets/fonts/Inter-Variable.ttf',
+//     },
+//     bridgeChannel: AppConstants.channelName,
+//     bridgeAnswers: const <String, Object?>{
+//       'isListenerEnabled': false,
+//       'overlayGranted': false,
+//     },
+//     setUpAll: () async {
+//       Hive.init(Directory.systemTemp.createTempSync('shots').path);
+//     },
+//   );
+//
+//   final List<Shot> shots = <Shot>[
+//     Shot(name: 'home', build: () => const HomeScreen()),
+//     Shot(name: 'settings', build: () => const SettingsScreen()),
+//     // The case that catches what a comfortable phone hides.
+//     Shot(
+//       name: 'settings-narrow',
+//       build: () => const SettingsScreen(),
+//       logicalSize: const Size(320, 1400),
+//     ),
+//   ];
+import 'shot_framework.dart';
+
+/// No shots yet - add the app's screens here.
+final List<Shot> shots = <Shot>[];
+
+/// A pass-through until you fill it in: with no app shell there is no theme, so
+/// the first real shot needs the block in the comment above.
+final ShotEnv env = ShotEnv(app: (shot, home) => home);
+AGENT_PACK_SHOT_REGISTRY_DART_EOF
+
+cat > "$stage/local_screenshots.py" <<'AGENT_PACK_LOCAL_SCREENSHOTS_PY_EOF'
+#!/usr/bin/env python3
+"""Render app screens to PNGs, locally, in seconds - no device and no CI.
+
+    python3 tool/local_screenshots.py --list
+    python3 tool/local_screenshots.py --shot settings
+    python3 tool/local_screenshots.py --shot settings,about
+    python3 tool/local_screenshots.py                  # every shot
+    python3 tool/local_screenshots.py --shot about --open
+
+Why this exists next to tool/see_screen.py: that one asks CI to build the web
+app and photograph *routes*. It costs a run, and it cannot reach a screen you
+have to tap into - a pushed detail screen, a settings sub-page. This renders the
+widget in the test harness with the app's real theme and real fonts, so it takes
+about a second, works offline, and photographs exactly what you named.
+
+Two things keep it out of everybody else's way:
+
+  * the runner lives in tool/, not test/, so a plain `flutter test` never
+    discovers it - CI stays as fast as it was;
+  * the runner is a no-op without --dart-define=SHOTS=1, so nothing starts
+    writing PNGs by accident.
+
+It is not a test. It writes throwaway evidence to .agent-screens/local/
+(git-ignored), it compares nothing, and no test may read those files back.
+
+Screens are named in tool/screenshots/shot_registry.dart - the one file in that
+directory the pack owns no part of.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+RUNNER = "tool/screenshots/shot_runner_test.dart"
+REGISTRY = ROOT / "tool" / "screenshots" / "shot_registry.dart"
+OUT_DIR = ROOT / ".agent-screens" / "local"
+
+
+def find_flutter() -> str:
+    """PATH first, then the places an SDK normally lives."""
+    on_path = shutil.which("flutter")
+    if on_path:
+        return on_path
+    candidates = [
+        os.environ.get("FLUTTER_ROOT", ""),
+        "/var/tmp/flutter",
+        os.path.expanduser("~/flutter"),
+        os.path.expanduser("~/development/flutter"),
+    ]
+    for root in candidates:
+        if not root:
+            continue
+        for candidate in (Path(root) / "bin" / "flutter", Path(root)):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    sys.exit(
+        "local_screenshots: flutter not found.\n"
+        "  Put it on PATH, set FLUTTER_ROOT, or install it:\n"
+        "  bash <(curl -fsSL https://raw.githubusercontent.com/Keshab1997/"
+        "flutter-builder/main/scripts/install.sh)"
+    )
+
+
+def known_shots() -> list[str]:
+    """Read the registry rather than keeping a second list that can drift."""
+    if not REGISTRY.exists():
+        sys.exit(
+            f"local_screenshots: {REGISTRY.relative_to(ROOT)} is missing. "
+            "Re-run the agent-pack installer to create it."
+        )
+    source = REGISTRY.read_text(encoding="utf-8")
+    # Strip comments first: the installed template ships a worked example inside
+    # a block comment, and a commented-out shot is not a shot. Whole-line `//`
+    # comments only, so a `//` inside a string stays put.
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    source = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("//")
+    )
+    return re.findall(r"\bname:\s*'([^']+)'", source)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="local_screenshots.py",
+        description="Render screens to PNGs locally, in seconds.",
+    )
+    parser.add_argument(
+        "--shot",
+        default="",
+        help="comma-separated shot names (default: every shot in the registry)",
+    )
+    parser.add_argument("--list", action="store_true", help="print the shots and exit")
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="open each PNG with the desktop viewer after rendering",
+    )
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="keep the PNGs of earlier runs (default: they are overwritten by name)",
+    )
+    args = parser.parse_args()
+
+    shots = known_shots()
+    if args.list:
+        if not shots:
+            print(
+                "no shots yet - add entries to "
+                "tool/screenshots/shot_registry.dart"
+            )
+            return 0
+        print("shots:")
+        for name in shots:
+            print(f"  {name}")
+        return 0
+
+    if not shots:
+        sys.exit(
+            "local_screenshots: the registry has no shots yet. Add one:\n"
+            "  Shot(name: 'home', build: () => const HomeScreen()),"
+        )
+
+    if args.shot:
+        wanted = [s.strip() for s in args.shot.split(",") if s.strip()]
+        unknown = [s for s in wanted if s not in shots]
+        if unknown:
+            sys.exit(
+                f"unknown shot(s): {', '.join(unknown)}\n"
+                f"known: {', '.join(shots)}"
+            )
+
+    if not args.keep:
+        for stale in OUT_DIR.glob("*.png"):
+            stale.unlink()
+
+    flutter = find_flutter()
+    command = [
+        flutter,
+        "test",
+        RUNNER,
+        "--update-goldens",
+        "--dart-define=SHOTS=1",
+        f"--dart-define=SHOT={args.shot}",
+    ]
+    result = subprocess.run(command, cwd=ROOT)
+    if result.returncode != 0:
+        return result.returncode
+
+    written = sorted(OUT_DIR.glob("*.png"))
+    if args.shot:
+        wanted = {s.strip() for s in args.shot.split(",") if s.strip()}
+        written = [p for p in written if p.stem in wanted]
+
+    if not written:
+        sys.exit(f"local_screenshots: no PNGs in {OUT_DIR} - did the run fail?")
+
+    print("\nrendered:")
+    for path in written:
+        print(f"  {path.relative_to(ROOT)}  ({path.stat().st_size // 1024} KB)")
+    print("\nnow open them - do not guess what a screen looks like.")
+
+    if args.open:
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        for path in written:
+            subprocess.run([opener, str(path)], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+AGENT_PACK_LOCAL_SCREENSHOTS_PY_EOF
+
 changes=()
 conflicts=()
-for name in preflight.py ci_watch.py agent_loop.py see_screen.py; do
+for name in preflight.py ci_watch.py agent_loop.py see_screen.py local_screenshots.py; do
   dest="$repo_root/tool/$name"
   if [ -e "$dest" ]; then
     if cmp -s "$stage/$name" "$dest"; then
@@ -1890,7 +2512,40 @@ for name in preflight.py ci_watch.py agent_loop.py see_screen.py; do
   changes+=("$name")
 done
 
-if [ "${#conflicts[@]}" -gt 0 ] && [ "$force" = false ]; then
+# The harness lives in a subdirectory, and one file there is the project's:
+# shot_registry.dart names the app's screens, so it is written once when absent
+# and never replaced - not with --force either, because a force install must
+# not quietly delete a list of screens someone wrote by hand.
+shot_changes=()
+shot_conflicts=()
+registry_new=false
+shots_dir="$repo_root/tool/screenshots"
+for name in shot_framework.dart shot_runner_test.dart; do
+  dest="$shots_dir/$name"
+  if [ -e "$dest" ]; then
+    if cmp -s "$stage/$name" "$dest"; then
+      say "Already current: tool/screenshots/$name"
+      continue
+    fi
+    shot_conflicts+=("$name")
+    if [ "$force" = true ]; then
+      say "Will replace (backup first): tool/screenshots/$name"
+    else
+      say "CONFLICT (left untouched): tool/screenshots/$name"
+    fi
+  else
+    say "Will add: tool/screenshots/$name"
+  fi
+  shot_changes+=("$name")
+done
+if [ -e "$shots_dir/shot_registry.dart" ]; then
+  say "Kept as-is (yours): tool/screenshots/shot_registry.dart"
+else
+  say "Will add: tool/screenshots/shot_registry.dart (template - list your screens)"
+  registry_new=true
+fi
+
+if { [ "${#conflicts[@]}" -gt 0 ] || [ "${#shot_conflicts[@]}" -gt 0 ]; } && [ "$force" = false ]; then
   fail "Existing tool file(s) differ; nothing was changed. Review them, or rerun with --force to back them up and replace them."
 fi
 
@@ -1945,7 +2600,8 @@ case "$agents_action" in
   *) fail "internal error: unexpected AGENTS.md action '$agents_action'." ;;
 esac
 
-if [ "${#changes[@]}" -eq 0 ] && [ "$agents_action" = "unchanged" ]; then
+if [ "${#changes[@]}" -eq 0 ] && [ "${#shot_changes[@]}" -eq 0 ] \
+   && [ "$registry_new" = false ] && [ "$agents_action" = "unchanged" ]; then
   say "Agent pack $PACK_VERSION is already installed; nothing changed."
   exit 0
 fi
@@ -1955,15 +2611,23 @@ if [ "$dry_run" = true ]; then
   exit 0
 fi
 
-if [ "${#conflicts[@]}" -gt 0 ]; then
+if [ "${#conflicts[@]}" -gt 0 ] || [ "${#shot_conflicts[@]}" -gt 0 ]; then
   backups="$repo_root/.agent-pack-backups"
   [ ! -L "$backups" ] || fail "$backups is a symlink; refusing to write through it."
   [ ! -e "$backups" ] || [ -d "$backups" ] || fail "$backups is not a directory."
   mkdir -p -- "$backups"
   backup_dir="$(mktemp -d "$backups/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")"
-  for name in "${conflicts[@]}"; do
-    cp -p -- "$repo_root/tool/$name" "$backup_dir/$name"
-  done
+  # Guarded separately: either list can be empty under `set -u` on bash 3.2.
+  if [ "${#conflicts[@]}" -gt 0 ]; then
+    for name in "${conflicts[@]}"; do
+      cp -p -- "$repo_root/tool/$name" "$backup_dir/$name"
+    done
+  fi
+  if [ "${#shot_conflicts[@]}" -gt 0 ]; then
+    for name in "${shot_conflicts[@]}"; do
+      cp -p -- "$repo_root/tool/screenshots/$name" "$backup_dir/$name"
+    done
+  fi
   say "Originals backed up to: $backup_dir"
 fi
 
@@ -1988,6 +2652,30 @@ if [ "${#changes[@]}" -gt 0 ]; then
   done
 fi
 
+mkdir -p -- "$shots_dir"
+if [ "${#shot_changes[@]}" -gt 0 ]; then
+  for name in "${shot_changes[@]}"; do
+    (
+      temp="$(mktemp "$shots_dir/.$name.tmp.XXXXXX")"
+      trap 'rm -f -- "$temp"' EXIT
+      cp -- "$stage/$name" "$temp"
+      chmod 644 "$temp"
+      mv -f -- "$temp" "$shots_dir/$name"
+    )
+    say "Installed: tool/screenshots/$name"
+  done
+fi
+if [ "$registry_new" = true ]; then
+  (
+    temp="$(mktemp "$shots_dir/.shot_registry.dart.tmp.XXXXXX")"
+    trap 'rm -f -- "$temp"' EXIT
+    cp -- "$stage/shot_registry.dart" "$temp"
+    chmod 644 "$temp"
+    mv -f -- "$temp" "$shots_dir/shot_registry.dart"
+  )
+  say "Installed: tool/screenshots/shot_registry.dart (yours from now on)"
+fi
+
 if [ "$agents_action" != "unchanged" ]; then
   say "Installed: AGENTS.md ($agents_action)"
 fi
@@ -1996,6 +2684,9 @@ say "Done. Review the changes, then commit tool/ and AGENTS.md."
 say "  Before a push :  python3 tool/preflight.py"
 say "  After a push  :  python3 tool/ci_watch.py"
 say "  Whole loop    :  python3 tool/agent_loop.py -m \"fix(x): what changed\""
+say "  A screen      :  python3 tool/local_screenshots.py --list"
+say "                   then: python3 tool/local_screenshots.py --shot home"
+say "  Screenshots land in .agent-screens/ - add that to .gitignore."
 say "  Pack docs     :  ${RAW_BASE}/README.md"
 if [ ! -e "$repo_root/.agent-pack-backups" ]; then
   :
