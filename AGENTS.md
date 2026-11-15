@@ -12,7 +12,7 @@ This file is not it.
 ## The contract in one line
 
 This repo ships reusable GitHub Actions workflows and an agent pack. Projects
-consume them **by tag** (`@v1.15.2`), so **`main` is staging**: push to it
+consume them **by tag** (`@v1.16.0`), so **`main` is staging**: push to it
 freely, tag it deliberately.
 
 ```bash
@@ -44,6 +44,7 @@ you have taken a wrong turn — stop and re-read this table.
 | A shell script | `bash -n <file>` then `shellcheck <file>` | <1 s |
 | A Python tool (`agent-pack/*.py`, `scripts/*.py`) | `python3 -m pytest tests/ -q` | ~5 s |
 | Anything under `agent-pack/` | see *The sync rule* below | ~6 s |
+| `agent-pack/*.dart` (the screenshot harness) | the sync rule **and** `bash -n` on the installer; the Dart itself is verified in a real app, see below | ~7 s |
 | Anything at all, when unsure | `python3 -m pytest tests/ -q` | ~5 s |
 
 The repository's own suite is **fast on purpose**. Run the whole thing; do not
@@ -58,6 +59,13 @@ run a subset to save seconds.
    and `flutter build` have nothing to act on — installing a 2.5 GB SDK to
    "verify" a YAML or Bash change is pure loss. The CI runners install the SDKs
    for you when a workflow actually needs them.
+   *The exception is `agent-pack/*.dart`.* Those three files are payload, not an
+   app: they are compiled inside a real project that installs the pack, never
+   here. So a change to them is verified by installing the pack into a Flutter
+   app you already have, running `flutter analyze` and
+   `python3 tool/local_screenshots.py`, and pushing the installer only after
+   that — not by installing an SDK in this repo to type-check a file with no
+   `pubspec.yaml` above it.
 2. **Do not wait for CI after a push.** Nothing is triggered (see above). If you
    want a run, ask the human to dispatch it — that is their button, not yours.
 3. **Do not verify by re-running the installer end to end.** `tests/` already
@@ -110,7 +118,7 @@ python3 scripts/sync-agent-pack.py --check    # exit 1 when out of sync (CI-safe
 
 | | |
 |---|---|
-| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.15.2` and `install.sh --ref v1.15.2` |
+| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.16.0` and `install.sh --ref v1.16.0` |
 | `main` | staging — your landing zone, safe to push |
 | A tag | the release — **every project's CI changes at once** |
 
@@ -190,7 +198,7 @@ Claude ইত্যাদি সবই এটা খোঁজে)।
   **৫ সেকেন্ডে** চলে (`python3 -m pytest tests/ -q`), কোনো Flutter SDK ছাড়াই।
 - **CI ম্যানুয়াল** — push করলে কিছুই চলে না, তাই push করে অপেক্ষা করার মানে
   শুধু সময় নষ্ট। তাই এখানে সরাসরি `main`-এ push করাটাই নিয়ম।
-- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.15.2` pin করে),
+- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.16.0` pin করে),
   কিন্তু নতুন tag দিলে সবার CI একসাথে বদলে যায় আর connected সব project-এ
   নিজে থেকেই bump pull request যায় (`bump-consumers.yml`) — তাই tag আপনার
   সিদ্ধান্ত।

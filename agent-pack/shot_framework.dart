@@ -62,9 +62,9 @@ class Shot {
 /// Everything the framework needs to know about the app it is rendering.
 ///
 /// This is the whole contract with a project, and it is deliberately small:
-/// a theme, a wrapper, font files, and the mocks a widget test needs. A
-/// screenshot taken in a bare Material theme is a screenshot of a different
-/// app, so [theme] is required and there is no default.
+/// the app shell, a wrapper, font files, and the mocks a widget test needs. A
+/// screenshot taken in a bare theme is a screenshot of a different app, so
+/// [app] is required and there is no default.
 class ShotEnv {
   const ShotEnv({
     required this.app,
@@ -116,7 +116,7 @@ class ShotEnv {
   /// store instead. Leave it null only if no shot declares preferences.
   final Future<void> Function(Map<String, Object> values)? seedPreferences;
 
-  /// Runs once before every shot: Hive.init, temp directories, fake clocks.
+  /// Runs once before the first shot: Hive.init, temp directories, fake clocks.
   /// A widget that opens a local box throws without this, and the shot would be
   /// a red error page instead of a screen.
   final Future<void> Function()? setUpAll;
@@ -174,13 +174,18 @@ Future<void> _loadAppFonts(ShotEnv env) async {
     await loader.load();
   }
 
-  // Icons are a font too, and this one ships with the SDK, not the repo.
-  final sdk = Platform.environment['FLUTTER_ROOT'];
+  // Icons are a font too, and this one ships with the SDK, not the repo. Two
+  // ways to find the SDK: the environment, and the running binary itself - a
+  // test process lives at <sdk>/bin/cache/dart-sdk/bin/dart, so five parents up
+  // is the SDK root. Never a hard-coded install path: that is one machine's
+  // layout, and this file has to work on everybody's.
   final candidates = <String>[
-    if (sdk != null && sdk.isNotEmpty)
-      '$sdk/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-    '/var/tmp/flutter/bin/cache/artifacts/material_fonts/'
-        'MaterialIcons-Regular.otf',
+    for (final root in <String>[
+      Platform.environment['FLUTTER_ROOT'] ?? '',
+      _sdkRootFromExecutable(),
+    ])
+      if (root.isNotEmpty)
+        '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
   ];
   final icons = candidates.map(File.new).where((f) => f.existsSync()).toList();
   if (icons.isEmpty) {
@@ -194,6 +199,17 @@ Future<void> _loadAppFonts(ShotEnv env) async {
   final loader = FontLoader(env.materialIconsFamily)
     ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
   await loader.load();
+}
+
+/// `<sdk>/bin/cache/dart-sdk/bin/dart` -> `<sdk>`, where the SDK keeps the
+/// icon font. Empty when the binary does not sit inside an SDK (a `dart` from a
+/// package manager, say) - then FLUTTER_ROOT has to answer.
+String _sdkRootFromExecutable() {
+  Directory dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 5; i++) {
+    dir = dir.parent;
+  }
+  return dir.path;
 }
 
 void _mockBridge(TestWidgetsFlutterBinding binding, ShotEnv env) {

@@ -51,7 +51,7 @@ distribution/whatsnew/whatsnew-en-US
 distribution/whatsnew/whatsnew-bn-BD
 ```
 
-প্রতিটি run-এর আগে এই ফাইলগুলোতে সেই release-এর আসল পরিবর্তন সংক্ষেপে লিখে commit/push করুন। Locale filename হবে `whatsnew-<BCP-47 locale>`—যেমন `whatsnew-en-US`। Notes directory workflow-তে `play-whats-new-directory` দিয়ে সেট করা আছে। Sample caller `@v1.15.2` pin করে — `play-whats-new-directory` input এই tag থেকেই আছে। পুরোনো tag (যেমন `@v1.8.6`)-এ এই input নেই, তাই caller ও wrapper সবসময় একই tag-এ pin করুন।
+প্রতিটি run-এর আগে এই ফাইলগুলোতে সেই release-এর আসল পরিবর্তন সংক্ষেপে লিখে commit/push করুন। Locale filename হবে `whatsnew-<BCP-47 locale>`—যেমন `whatsnew-en-US`। Notes directory workflow-তে `play-whats-new-directory` দিয়ে সেট করা আছে। Sample caller `@v1.16.0` pin করে — `play-whats-new-directory` input এই tag থেকেই আছে। পুরোনো tag (যেমন `@v1.8.6`)-এ এই input নেই, তাই caller ও wrapper সবসময় একই tag-এ pin করুন।
 
 > **App যদি subfolder-এ থাকে:** এই path `working-directory`-এর সাথে জোড়া
 > লাগে, তাই `'distribution/whatsnew'` লিখলে খোঁজা হয়
@@ -60,7 +60,7 @@ distribution/whatsnew/whatsnew-bn-BD
 > directory যাচাই হয় — না পেলে run ওখানেই থেমে যায়, তাই ভুল path-এ
 > version code নষ্ট হয় না (Play-তে upload হয়ে গেলে সেটা ফেরানো যায় না)।
 
-**৫০০ character-এর সীমা (v1.15.2+):** প্রতিটি locale file-এ Play সর্বোচ্চ ৫০০
+**৫০০ character-এর সীমা (v1.16.0+):** প্রতিটি locale file-এ Play সর্বোচ্চ ৫০০
 character নেয়, আর সীমা ছাড়ালে ধরা পড়ে upload হয়ে যাওয়ার *পরে* — তখন version
 code খরচ হয়ে যায়। তাই একই check এখন প্রতিটি file-এর character সংখ্যা গুনে
 আগেই fail করে, আর `whatsnew-` দিয়ে নাম শুরু না হলে warning দেয় (Play ওই

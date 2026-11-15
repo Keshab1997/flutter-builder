@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the flutter-builder agent pack into an existing Flutter repository.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.15.2/scripts/install-agent-pack.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.0/scripts/install-agent-pack.sh | bash
 #
 # What it installs (repository root, never touches anything else):
 #   tool/preflight.py    Dart checks that need no Flutter SDK: dead code,
@@ -39,7 +39,7 @@
 # curl | bash. It never adds GitHub secrets and never runs git.
 set -euo pipefail
 
-PACK_VERSION=v1.15.2
+PACK_VERSION=v1.16.0
 REPO=Keshab1997/flutter-builder
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/${PACK_VERSION}"
 
@@ -54,7 +54,7 @@ tool/screenshots/ harness and a managed AGENTS.md block) into a Flutter
 repository. No Flutter SDK needed to install.
 
 Run from anywhere inside the repository:
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.15.2/scripts/install-agent-pack.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.0/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything
@@ -1608,7 +1608,7 @@ cat > "$stage/agents-template.md" <<'AGENT_PACK_AGENTS_MD_EOF'
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep the work moving without burning CI.
 
-<!-- flutter-builder:agent-pack:start v1.15.2 -->
+<!-- flutter-builder:agent-pack:start v1.16.0 -->
 ## Rule #1 — CI is manual; preflight is your check
 
 This repository runs CI **only when the human dispatches it** (Actions → *Flutter
@@ -1981,9 +1981,9 @@ class Shot {
 /// Everything the framework needs to know about the app it is rendering.
 ///
 /// This is the whole contract with a project, and it is deliberately small:
-/// a theme, a wrapper, font files, and the mocks a widget test needs. A
-/// screenshot taken in a bare Material theme is a screenshot of a different
-/// app, so [theme] is required and there is no default.
+/// the app shell, a wrapper, font files, and the mocks a widget test needs. A
+/// screenshot taken in a bare theme is a screenshot of a different app, so
+/// [app] is required and there is no default.
 class ShotEnv {
   const ShotEnv({
     required this.app,
@@ -2035,7 +2035,7 @@ class ShotEnv {
   /// store instead. Leave it null only if no shot declares preferences.
   final Future<void> Function(Map<String, Object> values)? seedPreferences;
 
-  /// Runs once before every shot: Hive.init, temp directories, fake clocks.
+  /// Runs once before the first shot: Hive.init, temp directories, fake clocks.
   /// A widget that opens a local box throws without this, and the shot would be
   /// a red error page instead of a screen.
   final Future<void> Function()? setUpAll;
@@ -2093,13 +2093,18 @@ Future<void> _loadAppFonts(ShotEnv env) async {
     await loader.load();
   }
 
-  // Icons are a font too, and this one ships with the SDK, not the repo.
-  final sdk = Platform.environment['FLUTTER_ROOT'];
+  // Icons are a font too, and this one ships with the SDK, not the repo. Two
+  // ways to find the SDK: the environment, and the running binary itself - a
+  // test process lives at <sdk>/bin/cache/dart-sdk/bin/dart, so five parents up
+  // is the SDK root. Never a hard-coded install path: that is one machine's
+  // layout, and this file has to work on everybody's.
   final candidates = <String>[
-    if (sdk != null && sdk.isNotEmpty)
-      '$sdk/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-    '/var/tmp/flutter/bin/cache/artifacts/material_fonts/'
-        'MaterialIcons-Regular.otf',
+    for (final root in <String>[
+      Platform.environment['FLUTTER_ROOT'] ?? '',
+      _sdkRootFromExecutable(),
+    ])
+      if (root.isNotEmpty)
+        '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
   ];
   final icons = candidates.map(File.new).where((f) => f.existsSync()).toList();
   if (icons.isEmpty) {
@@ -2113,6 +2118,17 @@ Future<void> _loadAppFonts(ShotEnv env) async {
   final loader = FontLoader(env.materialIconsFamily)
     ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
   await loader.load();
+}
+
+/// `<sdk>/bin/cache/dart-sdk/bin/dart` -> `<sdk>`, where the SDK keeps the
+/// icon font. Empty when the binary does not sit inside an SDK (a `dart` from a
+/// package manager, say) - then FLUTTER_ROOT has to answer.
+String _sdkRootFromExecutable() {
+  Directory dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 5; i++) {
+    dir = dir.parent;
+  }
+  return dir.path;
 }
 
 void _mockBridge(TestWidgetsFlutterBinding binding, ShotEnv env) {
@@ -2348,6 +2364,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -2450,9 +2467,11 @@ def main() -> int:
                 f"known: {', '.join(shots)}"
             )
 
-    if not args.keep:
-        for stale in OUT_DIR.glob("*.png"):
-            stale.unlink()
+    # Remember what was already there instead of deleting it: a run that fails
+    # is exactly the moment the previous pictures are worth keeping. The stale
+    # ones are removed after a run that worked.
+    before = {path.name for path in OUT_DIR.glob("*.png")}
+    started = time.time()
 
     flutter = find_flutter()
     command = [
@@ -2467,10 +2486,18 @@ def main() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    written = sorted(OUT_DIR.glob("*.png"))
-    if args.shot:
-        wanted = {s.strip() for s in args.shot.split(",") if s.strip()}
-        written = [p for p in written if p.stem in wanted]
+    # What this run wrote, not what happens to be lying in the directory: a
+    # `--shot home` run must not print last week's settings screen as if it had
+    # just rendered it.
+    written = sorted(
+        path
+        for path in OUT_DIR.glob("*.png")
+        if path.name not in before or path.stat().st_mtime >= started - 1
+    )
+    if not args.keep:
+        for stale in sorted(OUT_DIR.glob("*.png")):
+            if stale not in written:
+                stale.unlink()
 
     if not written:
         sys.exit(f"local_screenshots: no PNGs in {OUT_DIR} - did the run fail?")

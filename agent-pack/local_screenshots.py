@@ -35,6 +35,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,9 +138,11 @@ def main() -> int:
                 f"known: {', '.join(shots)}"
             )
 
-    if not args.keep:
-        for stale in OUT_DIR.glob("*.png"):
-            stale.unlink()
+    # Remember what was already there instead of deleting it: a run that fails
+    # is exactly the moment the previous pictures are worth keeping. The stale
+    # ones are removed after a run that worked.
+    before = {path.name for path in OUT_DIR.glob("*.png")}
+    started = time.time()
 
     flutter = find_flutter()
     command = [
@@ -154,10 +157,18 @@ def main() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    written = sorted(OUT_DIR.glob("*.png"))
-    if args.shot:
-        wanted = {s.strip() for s in args.shot.split(",") if s.strip()}
-        written = [p for p in written if p.stem in wanted]
+    # What this run wrote, not what happens to be lying in the directory: a
+    # `--shot home` run must not print last week's settings screen as if it had
+    # just rendered it.
+    written = sorted(
+        path
+        for path in OUT_DIR.glob("*.png")
+        if path.name not in before or path.stat().st_mtime >= started - 1
+    )
+    if not args.keep:
+        for stale in sorted(OUT_DIR.glob("*.png")):
+            if stale not in written:
+                stale.unlink()
 
     if not written:
         sys.exit(f"local_screenshots: no PNGs in {OUT_DIR} - did the run fail?")
