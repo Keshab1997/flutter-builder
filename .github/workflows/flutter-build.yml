@@ -185,6 +185,17 @@ on:
         required: false
         type: boolean
         default: false
+      check-toolchain:
+        description: >-
+          Read the project's Flutter pin (.fvmrc) and its Android toolchain
+          (AGP in android/settings.gradle.kts, the Gradle wrapper, the Kotlin
+          plugin) and fail — before anything is built — when the two disagree.
+          A pin that moved ahead of the template is how a build dies minutes
+          later with "AGP X is lower than Flutter's minimum Y". On by default:
+          it costs a second and needs no SDK.
+        required: false
+        type: boolean
+        default: true
       fail-on-placeholders:
         description: Fail when Google test ad unit IDs, com.example ids or debug signing are still in the release
         required: false
@@ -484,6 +495,24 @@ jobs:
           else
             echo "Android platform already exists; generation skipped."
           fi
+
+      # Runs before pub get and long before Gradle: when the Flutter pin and the
+      # android/ template disagree, the APK build fails later with a message
+      # that names Gradle instead of the pin that moved. A fetched copy is used
+      # so older consumer pins still get the newest checks; a failed fetch is
+      # never fatal, it just skips the check.
+      - name: Check Flutter pin against the Android toolchain
+        if: inputs.check-toolchain
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -uo pipefail
+          checker="$RUNNER_TEMP/check_toolchain.py"
+          url="https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/check_toolchain.py"
+          if ! curl -fsSL "$url" -o "$checker"; then
+            echo "::notice::toolchain check skipped: could not fetch $url"
+            exit 0
+          fi
+          python3 "$checker"
 
       - name: Install dependencies
         run: flutter pub get

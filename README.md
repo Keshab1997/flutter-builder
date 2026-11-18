@@ -106,6 +106,34 @@ Signed build ও Play upload-এর জন্য repository secret লাগে�
 
 About → Website automation needs `APP_PRIVATE_KEY` (GitHub App) or `ABOUT_LINK_TOKEN`; `about-link-overwrite` controls replacing an existing link. / About → Website automation-এ `APP_PRIVATE_KEY` (GitHub App) অথবা `ABOUT_LINK_TOKEN` লাগে; বিদ্যমান link বদলাবে কি না `about-link-overwrite` ঠিক করে।
 
+## Toolchain pin check / Toolchain pin যাচাই
+
+A Flutter app pins Flutter in `.fvmrc` but its AGP, Gradle and Kotlin plugin
+live in `android/`. Nothing makes them move together — so a bump on one side
+fails the APK build minutes later with a message that names the *Gradle* side:
+`Your project's Android Gradle Plugin version (9.1.0) is lower than Flutter's
+minimum supported version (9.1.1)`.
+
+`flutter-build.yml` now checks this before anything is built (`check-toolchain`,
+on by default), and you can run it yourself — no SDK needed:
+
+```bash
+python3 scripts/check_toolchain.py                 # this repo
+python3 scripts/check_toolchain.py --root ../app   # any checkout
+```
+
+It reads the pin, the AGP version in `android/settings.gradle.kts`, the Gradle
+wrapper and the Kotlin plugin, and compares them with the floors the pinned
+Flutter enforces (read from the SDK's `DependencyVersionChecker.kt` when an SDK
+is present, else from a built-in table). An unknown Flutter version is a
+failure, not a pass. It also notes when AGP >= 9.2 means the Gradle JVM must be
+JDK 21.
+
+Flutter app-এ Flutter pin থাকে `.fvmrc`-এ, আর AGP/Gradle/Kotlin থাকে
+`android/`-এ। এক দিক bump করলে APK build মিনিট খরচের পরে fail করে, আর error
+Gradle-কে দোষ দেয়। তাই build শুরুর আগেই এই যাচাই চলে; `--root` দিয়ে যেকোনো
+checkout-এ নিজেও চালাতে পারেন।
+
 ## Agent tools / Agent-এর tools
 
 Optional, no Flutter SDK required. / ঐচ্ছিক; Flutter SDK লাগে না।
@@ -123,6 +151,7 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.17.0/
 | `tool/see_screen.py` | Have CI photograph a screen and print the image paths. / CI দিয়ে screen-এর ছবি নিতে পাঠায়, তারপর image-এর path দেখায়। |
 | `tool/screenshots/` | The harness: `shot_framework.dart` + `shot_runner_test.dart` (pack) and **your** `shot_registry.dart`. / Harness: framework ও runner pack-এর, `shot_registry.dart` আপনার। |
 | `scripts/doctor.sh` | Check app/release configuration. / App ও release configuration যাচাই করে। |
+| `scripts/check_toolchain.py` | Keep the Flutter pin and AGP/Gradle/Kotlin in step. / Flutter pin আর AGP/Gradle/Kotlin মিলিয়ে রাখে। |
 
 **With Captain Fast Lane:** attach the app repo in Arena for app work, or
 attach `Keshab1997/flutter-builder` for changes to this repository. Briefs live
