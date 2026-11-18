@@ -226,6 +226,22 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(see_help.returncode, 0, see_help.stderr)
         self.assertIn("--route", see_help.stdout)
 
+    def test_installed_playbook_routes_captain_before_main_shortcut(self) -> None:
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        agents = self.agents_md()
+        lane_intro = agents.index("## Captain task or independent work?")
+        lane_end = agents.index("## Rule #1")
+        self.assertLess(agents.index(HED), lane_intro)
+        self.assertLess(lane_intro, lane_end)
+        self.assertLess(lane_end, agents.index("python3 tool/agent_loop.py -m"))
+        captain = agents[lane_intro:lane_end]
+        for rule in ("**app repo** in Arena Agent Mode", "`BRIEF.md` and `task.json`",
+                     "`arena/*` branch", "Do not push `main`", "`@Keshab1997`",
+                     "`MENTION PENDING`"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, captain)
+
     def test_rerun_is_idempotent_and_changes_nothing(self) -> None:
         self.flutter_app()
         self.assert_success(self.run_installer())

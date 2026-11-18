@@ -9,21 +9,39 @@ This file is not it.
 
 ---
 
-## The contract in one line
+## Choose your lane before running Git
+
+- **Captain assignment:** attach `Keshab1997/flutter-builder` in Arena Agent
+  Mode. Read the pinned `BRIEF.md` and `task.json` from this repo's GitHub docs
+  and use [Captain Fast Lane](https://github.com/Keshab1997/agent-bootstrap/blob/main/captain/FASTLANE.md).
+  Edit only assigned files. Run `python3 -m pytest tests/ -q`; for an
+  `agent-pack/` change, sync the installer and run the parity check below
+  before the tests. Push a verified checkpoint only to the real `arena/*`
+  branch. Then mention `@Keshab1997` in the approved tracking issue, or report
+  `MENTION PENDING` with the commit link in Arena if you cannot comment.
+  No checkout switch, `main` push, PR action, CI dispatch, tag, or release.
+  Shared `.github/workflows/` changes are reserved for the Captain with
+  approval. If this repo is not attached, report `BLOCKED`; don't use a
+  separate clone.
+- **Independent work:** the direct-to-`main` examples below apply only when
+  the human explicitly authorizes it. They are not a fallback for a Captain task.
+
+## Independent work: the staging loop
 
 This repo ships reusable GitHub Actions workflows and an agent pack. Projects
-consume them **by tag** (`@v1.16.0`), so **`main` is staging**: push to it
-freely, tag it deliberately.
+consume them **by tag** (`@v1.16.0`), so **`main` is staging**, not a release.
+The Captain owns integration for Captain assignments.
 
 ```bash
-# the whole loop. this is not a simplification.
+# Only for independent work explicitly authorized to push to main.
 python3 -m pytest tests/ -q          # fast, no SDK — the real gate
 git commit -am "fix(scope): what changed" && git push origin main
 ```
 
-No feature branch. No pull request. No waiting. **Nothing in this repository
-triggers on a plain `push` or `pull_request`**: six workflows are `workflow_call`
-(they run only when a consumer project calls them), one is a weekly `schedule`,
+No PR or wait is needed for an authorized independent `main` push.
+**Nothing in this repository triggers on a plain `push` or `pull_request`**:
+six workflows are `workflow_call` (they run only when a consumer project calls
+them), one is a weekly `schedule`,
 one runs on `v*` tags (`bump-consumers.yml`, which opens the pin-bump pull
 requests in consumer projects), and the rest are `workflow_dispatch` (manual). So
 a push to `main` starts nothing — waiting for a run that was never queued is the
@@ -74,9 +92,9 @@ run a subset to save seconds.
 4. **Do not clone a consumer app to test a workflow change.** The workflows
    here are libraries; their correctness is exercised by `flutter-smoke-test.yml`
    on a runner, not by a local app.
-5. **Do not push to more than one place for safety.** `main` is the only branch.
-   Nothing is waiting on it. Waiting for "a second opinion" from a branch or a
-   draft PR just moves the same diff through two more steps.
+5. **Do not push the same change to multiple branches.** A Captain worker
+   checkpoints only its assigned `arena/*` branch. Independent work explicitly
+   authorized for `main` does not need a duplicate branch or draft PR.
 
 ---
 
@@ -119,11 +137,12 @@ python3 scripts/sync-agent-pack.py --check    # exit 1 when out of sync (CI-safe
 | | |
 |---|---|
 | Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.16.0` and `install.sh --ref v1.16.0` |
-| `main` | staging — your landing zone, safe to push |
-| A tag | the release — **every project's CI changes at once** |
+| `main` | staging — Captain integration or expressly authorized independent pushes |
+| A tag | publishes a new version and starts consumer pin-bump PRs |
 
-So: landing a change on `main` is low-risk and expected. **Reaching users is
-the deliberate act.** Concretely:
+These landing rules apply to the Captain or to expressly authorized
+independent work, never to a Captain worker. **Reaching consumers is the
+deliberate act.** Concretely:
 
 - Docs, comments, refactors, new optional inputs → push to `main`, done.
 - A **breaking** change (removing/renaming a workflow input, a required secret,
@@ -159,7 +178,8 @@ exactly the hour this file exists to prevent.
 
 - **Small, focused diffs.** One concern per commit; conventional messages
   (`fix(ui): …`, `chore(release): …`, `docs: …`).
-- **Push straight to `main`.** No branch, no PR.
+- **Respect the lane above.** Captain workers push only to their `arena/*`
+  branch. Only explicitly authorized independent work pushes straight to `main`.
 - **Respect the existing voice.** Comments explain *why* the code is the way it
   is; keep that. Read the file before changing it.
 - **Secrets never enter git.** `.jks`, `.keystore`, `*.pem`, `key.properties`,
@@ -177,6 +197,9 @@ exactly the hour this file exists to prevent.
 - anything that publishes publicly or spends money.
 
 ## When to write to `main` versus when to think first
+
+For authorized integration or independent work only. Captain workers report
+checkpoints, not `main` pushes.
 
 | Change | Do it | Think, then do it |
 |---|---|---|
@@ -196,12 +219,13 @@ Claude ইত্যাদি সবই এটা খোঁজে)।
 
 - **এখানে "test করতে করতে ঘণ্টা" লাগার কোনো কারণ নেই** — পুরো test suite
   **৫ সেকেন্ডে** চলে (`python3 -m pytest tests/ -q`), কোনো Flutter SDK ছাড়াই।
-- **CI ম্যানুয়াল** — push করলে কিছুই চলে না, তাই push করে অপেক্ষা করার মানে
-  শুধু সময় নষ্ট। তাই এখানে সরাসরি `main`-এ push করাটাই নিয়ম।
+- **Captain-এর কাজ হলে** Arena-তে `flutter-builder` attach করে GitHub brief
+  পড়ুন; worker push করবে শুধু `arena/*` branch-এ। আলাদা অনুমোদিত কাজেই
+  সরাসরি `main`-এ push। **CI ম্যানুয়াল** — push করে অপেক্ষা নয়।
 - **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.16.0` pin করে),
-  কিন্তু নতুন tag দিলে সবার CI একসাথে বদলে যায় আর connected সব project-এ
-  নিজে থেকেই bump pull request যায় (`bump-consumers.yml`) — তাই tag আপনার
-  সিদ্ধান্ত।
+  কিন্তু নতুন tag দিলে connected project-এ bump pull request যায়
+  (`bump-consumers.yml`)। PR merge না হওয়া পর্যন্ত আগের pin বদলাবে না; tag
+  আপনার সিদ্ধান্ত।
 - **আপনার app project-গুলো** (quizbaaz ইত্যাদি) যে `AGENTS.md` পায় সেটা এই
   ফাইল না — সেটা `agent-pack/AGENTS.template.md` থেকে
   `install-agent-pack.sh` বসায়। পুরোনো project-এ নতুন করে ওই installer

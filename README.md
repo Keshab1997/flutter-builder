@@ -123,5 +123,12 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.0/
 | `tool/screenshots/` | The harness: `shot_framework.dart` + `shot_runner_test.dart` (pack) and **your** `shot_registry.dart`. / Harness: framework ও runner pack-এর, `shot_registry.dart` আপনার। |
 | `scripts/doctor.sh` | Check app/release configuration. / App ও release configuration যাচাই করে। |
 
+**With Captain Fast Lane:** attach the app repo in Arena for app work, or
+attach `Keshab1997/flutter-builder` for changes to this repository. Briefs live
+in the attached repo. App workers can use the installed preflight and the
+assigned local test, but use [Fast Lane](https://github.com/Keshab1997/agent-bootstrap/blob/main/captain/FASTLANE.md)
+for their `arena/*` checkpoint, not `tool/agent_loop.py`. Existing release
+pins and human-run CI do not change.
+
 More details / আরও তথ্য: [workflow examples](examples/project-workflows/), [secrets guide](docs/AGENT_SECRETS_SETUP.md), [preview timing script](scripts/preview_timing.py).<br>
 License: [MIT](LICENSE).
