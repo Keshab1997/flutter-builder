@@ -8,7 +8,11 @@
 # Run it from the ROOT OF YOUR APP REPOSITORY, not from flutter-builder:
 #
 #     bash /path/to/flutter-builder/scripts/doctor.sh
-#     curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/doctor.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/doctor.sh | bash -s
+#
+# In a monorepo, point --app-dir at the app's directory:
+#
+#     bash /path/to/flutter-builder/scripts/doctor.sh --app-dir apps/mobile
 #
 # It never prints a secret value, only names, paths and lengths.
 #
@@ -17,23 +21,55 @@
 set -uo pipefail
 # deliberately no `set -e`: we want every check to run and collect all problems.
 
+# Self-contained so `curl ... | bash -s -- --help` works (where $0 is not
+# this script).
+usage() {
+  cat <<'HELP'
+flutter-builder doctor
+----------------------
+Checks that a Flutter app repository is actually ready to produce a signed,
+cloud-connected, ad-carrying release — and names whatever is not. Run it from
+the ROOT OF YOUR APP REPOSITORY, not from flutter-builder:
+
+    bash /path/to/flutter-builder/scripts/doctor.sh
+    curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/doctor.sh | bash -s
+
+Options:
+  --app-dir DIR      Flutter app directory inside the repository (monorepos),
+                     relative to the repository root; `--app-dir=DIR` works
+                     too. Signing, Firebase, source-hygiene and
+                     tracked-secret checks are scoped to that directory.
+  --ci               running inside GitHub Actions; local-only concerns
+                     (missing key.properties, no gh binary) are downgraded to
+                     info, because the workflow supplies those from secrets
+  --repo OWNER/NAME  skip the gh repo lookup
+  -h, --help         show this help and exit; also works when piped
+
+Environment:
+  DOCTOR_CI                 a non-empty value implies --ci
+  DOCTOR_REQUIRE_FIREBASE   require the GOOGLE_SERVICES_JSON_BASE64 secret
+                            even when the app has no firebase_ dependency
+
+It never prints a secret value, only names, paths and lengths.
+Exit status: 0 = nothing broken, 1 = at least one FAIL.
+HELP
+}
+
 # --------------------------------------------------------------------------- #
 # arguments
 # --------------------------------------------------------------------------- #
-#   --ci              running inside GitHub Actions. Local-only concerns
-#                     (missing key.properties, no gh binary) are downgraded to
-#                     info, because the workflow supplies those from secrets.
-#   --repo OWNER/NAME skip the gh repo lookup
-# --------------------------------------------------------------------------- #
 REPO_OVERRIDE=""
 CI_MODE=0
+APP_DIR=""
 [ -n "${DOCTOR_CI:-}" ] && CI_MODE=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --ci)            CI_MODE=1; shift ;;
     --repo)          REPO_OVERRIDE="${2:-}"; shift 2 ;;
     --repo=*)        REPO_OVERRIDE="${1#*=}"; shift ;;
-    -h|--help)       sed -n '2,22p' "$0"; exit 0 ;;
+    --app-dir)       APP_DIR="${2:-}"; shift 2 ;;
+    --app-dir=*)     APP_DIR="${1#*=}"; shift ;;
+    -h|--help)       usage; exit 0 ;;
     *)               shift ;;
   esac
 done
@@ -47,6 +83,8 @@ if [ -t 1 ]; then
 else
   C_RED=""; C_YEL=""; C_GRN=""; C_DIM=""; C_BLD=""; C_OFF=""
 fi
+
+NL=$'\n'
 
 PASS=0; FAIL=0; WARN=0
 FAILED_ITEMS=()
@@ -108,14 +146,30 @@ if [ "$(git rev-parse --show-prefix 2>/dev/null)" = "" ] && \
   warn "this looks like the flutter-builder repo itself — run doctor from your APP repo"
 fi
 
+# --app-dir scopes a monorepo app; it is relative to the repository root
+# (doctor is run from the root, like scripts/install.sh).
+if [ -n "$APP_DIR" ]; then
+  APP_DIR="${APP_DIR%/}"
+  [ -d "$APP_DIR" ] || { fail "no such directory: $APP_DIR (relative to the repository root)"; exit 1; }
+fi
+
 # locate the Android / iOS modules
 ANDROID_DIR=""; IOS_DIR=""
-for d in android flutter_app/android .; do
-  if [ -d "$d/app" ] && { [ -f "$d/app/build.gradle.kts" ] || [ -f "$d/app/build.gradle" ]; }; then
-    ANDROID_DIR="$d/app"; break
-  fi
-done
-for d in ios flutter_app/ios; do [ -d "$d/Runner" ] && IOS_DIR="$d/Runner" && break; done
+if [ -n "$APP_DIR" ]; then
+  for d in "$APP_DIR/android" "$APP_DIR/flutter_app/android" "$APP_DIR"; do
+    if [ -d "$d/app" ] && { [ -f "$d/app/build.gradle.kts" ] || [ -f "$d/app/build.gradle" ]; }; then
+      ANDROID_DIR="$d/app"; break
+    fi
+  done
+  for d in "$APP_DIR/ios" "$APP_DIR/flutter_app/ios"; do [ -d "$d/Runner" ] && IOS_DIR="$d/Runner" && break; done
+else
+  for d in android flutter_app/android .; do
+    if [ -d "$d/app" ] && { [ -f "$d/app/build.gradle.kts" ] || [ -f "$d/app/build.gradle" ]; }; then
+      ANDROID_DIR="$d/app"; break
+    fi
+  done
+  for d in ios flutter_app/ios; do [ -d "$d/Runner" ] && IOS_DIR="$d/Runner" && break; done
+fi
 [ -n "$ANDROID_DIR" ] && pass "Android module: $ANDROID_DIR" || warn "no Android module found"
 [ -n "$IOS_DIR" ]     && pass "iOS module: $IOS_DIR"         || info "no iOS module (fine if you only ship Android)"
 
@@ -135,8 +189,9 @@ fi
 # --------------------------------------------------------------------------- #
 head_ "3. Android signing"
 KEYPROPS=""
-for p in "${ANDROID_DIR%/app}/key.properties" android/key.properties \
-         flutter_app/android/key.properties key.properties; do
+for p in "${ANDROID_DIR%/app}/key.properties" \
+         ${APP_DIR:+"$APP_DIR/key.properties" "$APP_DIR/android/key.properties"} \
+         android/key.properties flutter_app/android/key.properties key.properties; do
   [ -f "$p" ] && KEYPROPS="$p" && break
 done
 
@@ -221,6 +276,16 @@ fi
 # 5. GitHub secrets & variables
 # --------------------------------------------------------------------------- #
 head_ "5. GitHub Actions secrets and variables"
+# Which optional secrets does this app actually need? The 4 Android signing
+# secrets are always required for a signed release; Firebase and AdMob only
+# matter when the app uses them.
+uses_firebase=no
+uses_admob=no
+if [ -n "$APP_DIR" ]; then PUBSPEC="$APP_DIR/pubspec.yaml"; else PUBSPEC="pubspec.yaml"; fi
+if [ -f "$PUBSPEC" ]; then
+  grep -Eq '^[[:space:]]*firebase_[A-Za-z0-9_]*:' "$PUBSPEC" && uses_firebase=yes
+  grep -Eq '^[[:space:]]*google_mobile_ads:' "$PUBSPEC" && uses_admob=yes
+fi
 if [ "$CI_MODE" = 1 ]; then
   info "skipped in CI — a run cannot read its own secrets, and values are never "
   info "  exposed; this section only makes sense on your machine"
@@ -236,10 +301,17 @@ elif have gh && [ -n "$REPO" ] && gh auth status >/dev/null 2>&1; then
     if [ -z "$out" ]; then pass "every required $label is present"
     else while IFS= read -r n; do [ -n "$n" ] && fail "  MISSING $label: $n"; done <<< "$out"; fi
   }
-  report secret   secret   ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS \
-                           KEY_PASSWORD GOOGLE_SERVICES_JSON_BASE64
-  report variable variable ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_INTERSTITIAL_ID \
-                           ADMOB_REWARDED_ID
+  report secret secret ANDROID_KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+  if [ -n "${DOCTOR_REQUIRE_FIREBASE:-}" ] || [ "$uses_firebase" = yes ]; then
+    report secret secret GOOGLE_SERVICES_JSON_BASE64
+  else
+    info "GOOGLE_SERVICES_JSON_BASE64 not required (no firebase_ dependency in $PUBSPEC; set DOCTOR_REQUIRE_FIREBASE to check it anyway)"
+  fi
+  if [ "$uses_admob" = yes ]; then
+    report variable variable ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_INTERSTITIAL_ID ADMOB_REWARDED_ID
+  else
+    info "ADMOB_* variables not required (no google_mobile_ads dependency in $PUBSPEC)"
+  fi
   info "remember: an EMPTY secret still shows up as present here"
   info "gh cannot read values back — see section 7"
 else
@@ -257,42 +329,63 @@ elif [ -d "$WF_DIR" ]; then
   WFS="$(ls "$WF_DIR"/*.yml "$WF_DIR"/*.yaml 2>/dev/null || true)"
   [ -n "$WFS" ] && pass "workflows found" || warn "no workflow files"
 
+  # Iterate the file list line by line (quoted) so .yaml callers and file
+  # names with spaces are handled; an unquoted $WFS would word-split on
+  # whitespace and the checks below would read the wrong files.
   MIN_VER="1.6.0"   # first release that writes google-services.json from a secret
   OLD=""
-  for f in $WFS; do
-    v="$(grep -oE 'flutter-builder/\.github/workflows/[a-zA-Z0-9._-]+\.yml@v[0-9][0-9.]*' "$f" \
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    v="$(grep -oE 'flutter-builder/\.github/workflows/[a-zA-Z0-9._-]*\.ya?ml@v[0-9][0-9.]*' "$f" \
          | grep -oE 'v[0-9][0-9.]*$' | tr -d 'v' | sort -V | head -1 || true)"
     [ -n "$v" ] || continue
-    ver_ge "$MIN_VER" "$v" || OLD="$OLD"$'\n'"  $f pins @$v"
-  done
+    ver_ge "$MIN_VER" "$v" || OLD="$OLD"$NL"  $f pins @$v"
+  done <<< "$WFS"
   [ -z "$OLD" ] && pass "flutter-builder pinned to >= v$MIN_VER" \
                 || fail "  OUTDATED builder (< v$MIN_VER) — google-services.json injection will not work:$OLD"
 
-  # ${{ secrets.* }} inside a `with:` block kills the run with zero jobs
-  BAD="$(awk '
-    /^[[:space:]]*with:[[:space:]]*$/ { inw=1; next }
-    /^[[:space:]]{0,4}[a-zA-Z_-]+:/  { inw=0 }
-    inw && /\$\{\{[[:space:]]*secrets\./ { print FILENAME " line " FNR }
-  ' $WFS 2>/dev/null || true)"
+  # ${{ secrets.* }} inside a `with:` block kills the run with zero jobs.
+  # The `with:` block ends at the next *job-level* key (indent <= 4); 6-space
+  # keys inside the block must not end it. The indent is measured explicitly
+  # because brace-interval regexes ({0,4}) are not portable across awk
+  # implementations (mawk mis-parses them).
+  BAD=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    bad="$(awk '
+      /^[[:space:]]*with:[[:space:]]*$/ { inw=1; next }
+      {
+        if (match($0, /[^ \t]/)) indent = RSTART - 1; else indent = 0
+        if (indent <= 4 && $0 ~ /^[ \t]*[A-Za-z_-]+:/) inw = 0
+        if (inw && $0 ~ /\$\{\{[[:space:]]*secrets\./) print FILENAME " line " FNR
+      }
+    ' "$f" 2>/dev/null || true)"
+    [ -n "$bad" ] && BAD="$BAD"$NL"$bad"
+  done <<< "$WFS"
   [ -z "$BAD" ] && pass "no \${{ secrets.* }} inside with: blocks" \
-                || fail "  \${{ secrets.* }} USED INSIDE with: — the run dies with zero jobs and no error:"$'\n'"$BAD"$'\n'"     use \${{ vars.* }} for dart-defines / build-env instead"
+                || fail "  \${{ secrets.* }} USED INSIDE with: — the run dies with zero jobs and no error:"$NL"$BAD"$NL"     use \${{ vars.* }} for dart-defines / build-env instead"
 
   # Is the Firebase secret actually forwarded? Only workflows that produce a
   # build artifact need it — a CI job that only runs analyze/test should NOT
   # receive secrets, so it is skipped rather than warned about.
   FWD=""
-  for f in $WFS; do
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
     grep -q 'flutter-builder' "$f" || continue
     builds=no
-    grep -qE 'build-(apk|aab):[[:space:]]*true' "$f" && builds=yes
+    # `build-apk: true` as well as expression-based callers such as
+    # `build-apk: ${{ inputs.format == 'apk' }}` both produce an artifact.
+    if grep -E '^[[:space:]]*build-(apk|aab):' "$f" | grep -Eq 'true|\$\{\{'; then
+      builds=yes
+    fi
     grep -q 'publish-release\.yml' "$f" && builds=yes
     [ "$builds" = yes ] || continue
     if grep -q 'secrets:[[:space:]]*inherit' "$f" || grep -q 'GOOGLE_SERVICES_JSON_BASE64' "$f"; then
       :
     else
-      FWD="$FWD"$'\n'"  $f builds an artifact but does not forward GOOGLE_SERVICES_JSON_BASE64"
+      FWD="$FWD"$NL"  $f builds an artifact but does not forward GOOGLE_SERVICES_JSON_BASE64"
     fi
-  done
+  done <<< "$WFS"
   [ -z "$FWD" ] && pass "GOOGLE_SERVICES_JSON_BASE64 forwarded by every build workflow" \
                 || warn "  workflow(s) that build but never receive the Firebase secret:$FWD"
 else
@@ -304,13 +397,16 @@ fi
 # --------------------------------------------------------------------------- #
 head_ "7. Source hygiene (would the release gate fail?)"
 LIB_DIR="${ANDROID_DIR%/app}"
-for cand in lib "$LIB_DIR/lib" flutter_app/lib; do [ -d "$cand" ] && LIB="$cand" && break; done
+LIB=""
+for cand in ${APP_DIR:+"$APP_DIR/lib"} lib ${ANDROID_DIR:+"$LIB_DIR/lib"} flutter_app/lib; do
+  [ -d "$cand" ] && LIB="$cand" && break
+done
 LIB="${LIB:-lib}"
 
 if [ -d "$LIB" ]; then
   HITS="$(grep -rlE 'ca-app-pub-3940256099942544' "$LIB" 2>/dev/null || true)"
   [ -z "$HITS" ] && pass "no Google test ad IDs under $LIB/" \
-                 || fail "  GOOGLE TEST AD ID IN SOURCE — release gate will fail:"$'\n'"$HITS"
+                 || fail "  GOOGLE TEST AD ID IN SOURCE — release gate will fail:"$NL"$HITS"
 else
   info "no lib/ directory to scan"
 fi
@@ -318,23 +414,29 @@ fi
 # A *production* AdMob app ID hardcoded in source. Google's own sample ID
 # (3940256099942544) is deliberately excluded: keeping it as a Gradle fallback
 # is safe, because the release gate only scans lib/ and the SDK never
-# initialises without real unit IDs.
+# initialises without real unit IDs. With --app-dir only the app's tree is
+# scanned, so other projects in a monorepo do not trigger this check.
+SCAN_DIR="${APP_DIR:-.}"
 PROD="$(grep -rnE 'ca-app-pub-[0-9]{8,}~[0-9]+' --include='*.dart' --include='*.kts' \
-        --include='*.xml' --include='*.gradle' . 2>/dev/null \
-        | grep -v '^./.git' \
+        --include='*.xml' --include='*.gradle' "$SCAN_DIR" 2>/dev/null \
+        | grep -v '/\.git/' \
         | grep -v 'ca-app-pub-3940256099942544' \
         | cut -d: -f1 | sort -u || true)"
 [ -z "$PROD" ] && pass "no production AdMob app ID hardcoded in source" \
-               || warn "  production AdMob app ID hardcoded — move it to a secret/variable:"$'\n'"$PROD"
+               || warn "  production AdMob app ID hardcoded — move it to a secret/variable:"$NL"$PROD"
 
 EX="$(grep -rlE 'com\.example\.' --include='*.dart' --include='*.kts' \
-      --include='*.xml' --include='*.gradle' . 2>/dev/null | grep -v '^./.git' || true)"
+      --include='*.xml' --include='*.gradle' "$SCAN_DIR" 2>/dev/null | grep -v '/\.git/' || true)"
 [ -z "$EX" ] && pass "no com.example placeholders" \
-             || warn "  com.example placeholders present:"$'\n'"$EX"
+             || warn "  com.example placeholders present:"$NL"$EX"
 
-TRACKED="$(git ls-files | grep -E '(google-services\.json|GoogleService-Info\.plist|key\.properties|\.jks$|\.keystore$)' || true)"
+if [ -n "$APP_DIR" ]; then
+  TRACKED="$(git ls-files -- "$APP_DIR" | grep -E '(google-services\.json|GoogleService-Info\.plist|key\.properties|\.jks$|\.keystore$)' || true)"
+else
+  TRACKED="$(git ls-files | grep -E '(google-services\.json|GoogleService-Info\.plist|key\.properties|\.jks$|\.keystore$)' || true)"
+fi
 [ -z "$TRACKED" ] && pass "no secrets/config tracked by git" \
-                  || fail "  SECRET FILES STILL TRACKED BY GIT:"$'\n'"$TRACKED"
+                  || fail "  SECRET FILES STILL TRACKED BY GIT:"$NL"$TRACKED"
 
 # --------------------------------------------------------------------------- #
 # summary

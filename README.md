@@ -30,8 +30,8 @@ Run from the Flutter app repository root. / Flutter app repository-র root থ�
 curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.1/scripts/install.sh | bash
 ```
 
-It installs four caller workflows. It does **not** install Flutter, create secrets, commit/push, or start a run. For a monorepo, add `--app-dir apps/mobile`; use `--dry-run` to preview changes and `--force` to replace a custom file (a backup is made).<br>
-এটি চারটি caller workflow বসায়। Flutter SDK install, secret তৈরি, commit/push বা workflow run করে না। Monorepo-তে `--app-dir apps/mobile`; আগে দেখতে `--dry-run`, custom file backup নিয়ে বদলাতে `--force` দিন।
+It installs four caller workflows; `--with-screenshots` and `--with-widget-tests` also install the UI-screenshot and widget-test callers. It does **not** install Flutter, create secrets, commit/push, or start a run. For a monorepo, add `--app-dir apps/mobile`; use `--dry-run` to preview changes and `--force` to replace a custom file (a backup is made).<br>
+এটি চারটি caller workflow বসায়; `--with-screenshots` ও `--with-widget-tests` দিয়ে UI-screenshot আর widget-test caller-ও বসবে। Flutter SDK install, secret তৈরি, commit/push বা workflow run করে না। Monorepo-তে `--app-dir apps/mobile`; আগে দেখতে `--dry-run`, custom file backup নিয়ে বদলাতে `--force` দিন।
 
 Reusable workflows should be pinned to a release tag. After a new release, update existing callers with:
 
@@ -120,6 +120,7 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.1/
 | `tool/ci_watch.py` | Read Actions results and failing logs. / Actions result ও fail log পড়ে। |
 | `tool/agent_loop.py` | Preflight, secret guard, commit and push in one loop. / এক loop-এ preflight, secret guard, commit ও push। |
 | `tool/local_screenshots.py` | Render any screen to a PNG locally, in about a second. / যেকোনো screen-কে locally PNG বানায়, প্রায় এক সেকেন্ডে। |
+| `tool/see_screen.py` | Have CI photograph a screen and print the image paths. / CI দিয়ে screen-এর ছবি নিতে পাঠায়, তারপর image-এর path দেখায়। |
 | `tool/screenshots/` | The harness: `shot_framework.dart` + `shot_runner_test.dart` (pack) and **your** `shot_registry.dart`. / Harness: framework ও runner pack-এর, `shot_registry.dart` আপনার। |
 | `scripts/doctor.sh` | Check app/release configuration. / App ও release configuration যাচাই করে। |
 
