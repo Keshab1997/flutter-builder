@@ -248,9 +248,10 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def _replace_version(text: str, old: str, new: str) -> tuple:
-    # Whole-token replacement: v1.16.1 must not match inside v1.16.10 or
-    # v1.16.1.0, and a letter before the v (part of another word) is ignored.
-    pattern = re.compile(rf"(?<![\w.]){re.escape(old)}(?![\d.])")
+    # Whole-token replacement: v1.16.1 must match before punctuation (like a
+    # sentence-ending period), never inside v1.16.10 or v1.16.1.0, and ignore
+    # any letter/digit/dot directly before the leading v.
+    pattern = re.compile(rf"(?<![\w.]){re.escape(old)}(?!\d)(?!\.\d)")
     return pattern.subn(new, text)
 
 

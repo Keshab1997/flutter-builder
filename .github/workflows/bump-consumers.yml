@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Tag to move consumers to (e.g. v1.16.1). Empty = the tag that triggered this run."
+        description: "Tag to move consumers to (e.g. v1.17.0). Empty = the tag that triggered this run."
         required: false
         type: string
       repos:

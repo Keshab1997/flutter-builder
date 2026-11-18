@@ -90,20 +90,23 @@ class VersionBumpTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = make_tree(Path(temp.name))
         self.before = snapshot(self.root)
+        self.cur = installer_version(self.root)
+        major, minor, _patch = (int(p) for p in self.cur[1:].split("."))
+        self.nxt = f"v{major}.{minor + 1}.0"
 
     def run_prep(self, *args: str) -> subprocess.CompletedProcess[str]:
         return run_helper(self.root, *args)
 
     def test_dry_run_writes_nothing(self) -> None:
-        done = self.run_prep("--version", "v1.17.0", "--dry-run")
+        done = self.run_prep("--version", self.nxt, "--dry-run")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("dry run", done.stdout)
         self.assertIn("scripts/install.sh", done.stdout)
         self.assertIn(".github/workflows/flutter-build.yml", done.stdout)
         self.assertEqual(snapshot(self.root), self.before)
 
-    def test_bump_to_v1_17_0(self) -> None:
-        done = self.run_prep("--version", "v1.17.0")
+    def test_bump_to_next_minor(self) -> None:
+        done = self.run_prep("--version", self.nxt)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
         check = self.run_prep("--check")
@@ -117,18 +120,18 @@ class VersionBumpTests(unittest.TestCase):
 
         installer = (self.root / "scripts" / "install-agent-pack.sh") \
             .read_text(encoding="utf-8")
-        self.assertIn("PACK_VERSION=v1.17.0", installer)
-        self.assertIn("agent-pack:start v1.17.0", installer)  # embedded marker
-        self.assertEqual(installer.count("v1.16.1"), 0)
+        self.assertIn(f"PACK_VERSION={self.nxt}", installer)
+        self.assertIn(f"agent-pack:start {self.nxt}", installer)
+        self.assertEqual(installer.count(self.cur), 0)
         template = (self.root / "agent-pack" / "AGENTS.template.md") \
             .read_text(encoding="utf-8")
-        self.assertIn("agent-pack:start v1.17.0", template)
-        self.assertEqual(template.count("v1.16.1"), 0)
+        self.assertIn(f"agent-pack:start {self.nxt}", template)
+        self.assertEqual(template.count(self.cur), 0)
 
         install = (self.root / "scripts" / "install.sh").read_text(encoding="utf-8")
-        self.assertIn("DEFAULT_REF=v1.17.0", install)
+        self.assertIn(f"DEFAULT_REF={self.nxt}", install)
         self.assertIn("v1.5.0", install)          # historical example untouched
-        self.assertEqual(install.count("v1.16.1"), 0)
+        self.assertEqual(install.count(self.cur), 0)
 
         # Historical "introduced in" references stay exactly where they were.
         self.assertIn("v1.6.0", (self.root / ".github/workflows" /
@@ -138,7 +141,7 @@ class VersionBumpTests(unittest.TestCase):
         smoke = (self.root / ".github/workflows" / "ui-screenshots.yml") \
             .read_text(encoding="utf-8")
         self.assertIn("v1.14.0", smoke)           # historical comment
-        self.assertIn("ref: v1.17.0", smoke)      # live pin moved
+        self.assertIn(f"ref: {self.nxt}", smoke)  # live pin moved
         play = (self.root / "docs" / "PLAY_INTERNAL_TESTING.md") \
             .read_text(encoding="utf-8")
         self.assertIn("v1.15.2+", play)
@@ -147,12 +150,12 @@ class VersionBumpTests(unittest.TestCase):
 
         example = (self.root / "examples/project-workflows" / "ci.yml") \
             .read_text(encoding="utf-8")
-        self.assertIn("flutter-build.yml@v1.17.0", example)
+        self.assertIn(f"flutter-build.yml@{self.nxt}", example)
 
     def test_rerun_is_idempotent(self) -> None:
-        self.assertEqual(self.run_prep("--version", "v1.17.0").returncode, 0)
+        self.assertEqual(self.run_prep("--version", self.nxt).returncode, 0)
         mid = snapshot(self.root)
-        done = self.run_prep("--version", "v1.17.0")
+        done = self.run_prep("--version", self.nxt)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("nothing to do", done.stdout)
         self.assertEqual(snapshot(self.root), mid)
@@ -160,7 +163,7 @@ class VersionBumpTests(unittest.TestCase):
     def test_preserves_executable_file_modes(self) -> None:
         script = self.root / "scripts" / "bump-consumers.sh"
         script.chmod(0o755)
-        done = self.run_prep("--version", "v1.17.0")
+        done = self.run_prep("--version", self.nxt)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual(script.stat().st_mode & 0o777, 0o755)
 
