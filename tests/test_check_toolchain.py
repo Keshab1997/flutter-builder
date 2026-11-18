@@ -281,6 +281,15 @@ class WorkflowWiring(unittest.TestCase):
             workflow, r'python3 "\$checker" --root \.',
             "the fetched checker needs --root . to see the project")
 
+    def test_checker_url_follows_the_pinned_tag(self):
+        # main is staging: a consumer on v1.18.x must run the checker that
+        # shipped with v1.18.x, not whatever landed in main since.
+        workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
+        self.assertNotIn(
+            "flutter-builder/main/scripts/check_toolchain.py", workflow,
+            "the checker must be fetched from the pinned tag, not main")
+        self.assertIn("refs/tags/", workflow)
+
     def test_step_ships_the_strict_switch(self):
         workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
         self.assertIn("REQUIRE_TOOLCHAIN_TABLE", workflow)

@@ -27,7 +27,7 @@ Installer সাধারণ caller ফাইল বসায়। CI, screensh
 Run from the Flutter app repository root. / Flutter app repository-র root থেকে চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.3/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.4/scripts/install.sh | bash
 ```
 
 It installs four caller workflows; `--with-screenshots` and `--with-widget-tests` also install the UI-screenshot and widget-test callers. It does **not** install Flutter, create secrets, commit/push, or start a run. For a monorepo, add `--app-dir apps/mobile`; use `--dry-run` to preview changes and `--force` to replace a custom file (a backup is made).<br>
@@ -36,7 +36,7 @@ It installs four caller workflows; `--with-screenshots` and `--with-widget-tests
 Reusable workflows should be pinned to a release tag. After a new release, update existing callers with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.3/scripts/bump-ref.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.4/scripts/bump-ref.sh | bash
 ```
 
 Reusable workflow production-এ release tag-এ pin করুন। নতুন release এলে `bump-ref.sh` দিয়ে পুরোনো caller-গুলোর pin update করুন।
@@ -49,12 +49,12 @@ A `v*` tag can do that for you: [`bump-consumers.yml`](.github/workflows/bump-co
 The focused runner uses `flutter test` in debug mode—no Android emulator. It captures `RenderFlex overflowed` and similar errors in the run summary and uploads the full console log as `flutter-widget-test-log`.<br>
 এই runner debug mode-এ `flutter test` চালায়—Android emulator লাগে না। `RenderFlex overflowed`-এর মতো error run summary-তে দেখায় এবং পুরো console log `flutter-widget-test-log` artifact হিসেবে রাখে।
 
-Copy the caller example into the app's `.github/workflows/` directory, then run **Actions → Flutter widget-test diagnostics → Run workflow**. It pins the runner at `v1.18.3`:
+Copy the caller example into the app's `.github/workflows/` directory, then run **Actions → Flutter widget-test diagnostics → Run workflow**. It pins the runner at `v1.18.4`:
 
 - [Reusable runner](.github/workflows/flutter-widget-tests.yml)
 - [Manual caller example](examples/project-workflows/widget-tests.yml)
 
-Manual caller example-টি app-এর `.github/workflows/`-এ কপি করে **Actions → Flutter widget-test diagnostics → Run workflow** চালান। এটি `v1.18.3` release-এ থাকা runner-কে pin করে।
+Manual caller example-টি app-এর `.github/workflows/`-এ কপি করে **Actions → Flutter widget-test diagnostics → Run workflow** চালান। এটি `v1.18.4` release-এ থাকা runner-কে pin করে।
 
 **Important / জরুরি:** The workflow only tests screens that your tests build; it does not launch or navigate the app. For a mobile overflow, render the affected screen at a phone-sized viewport, for example:
 
@@ -72,8 +72,8 @@ testWidgets('home fits a phone viewport', (tester) async {
 });
 ```
 
-Replace `MyApp` with the app root or the affected screen, and add any required mocks. The reusable runner ships in `v1.18.3`; the caller uses that release tag.<br>
-`MyApp`-এর জায়গায় app root বা সমস্যার screen দিন; দরকার হলে mock যোগ করুন। Reusable runner `v1.18.3` release-এ আছে; caller ওই tag-ই ব্যবহার করে।
+Replace `MyApp` with the app root or the affected screen, and add any required mocks. The reusable runner ships in `v1.18.4`; the caller uses that release tag.<br>
+`MyApp`-এর জায়গায় app root বা সমস্যার screen দিন; দরকার হলে mock যোগ করুন। Reusable runner `v1.18.4` release-এ আছে; caller ওই tag-ই ব্যবহার করে।
 
 ## Web preview & screenshots / Web preview ও screenshot
 
@@ -143,7 +143,7 @@ checkout-এ নিজেও চালাতে পারেন।
 Optional, no Flutter SDK required. / ঐচ্ছিক; Flutter SDK লাগে না।
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.3/scripts/install-agent-pack.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.4/scripts/install-agent-pack.sh | bash
 ```
 
 | Tool | Purpose / কাজ |

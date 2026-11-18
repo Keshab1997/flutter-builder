@@ -520,7 +520,15 @@ jobs:
         run: |
           set -uo pipefail
           checker="$RUNNER_TEMP/check_toolchain.py"
-          url="https://raw.githubusercontent.com/Keshab1997/flutter-builder/main/scripts/check_toolchain.py"
+          # Same tag as the `uses:` pin, not main: a consumer must run the
+          # checker that shipped with the workflow it pinned. If the tag is
+          # missing from the raw host (never the case for a release), the
+          # notice below says so and the step stays out of the way.
+          ref="main"
+          case "${GITHUB_REF:-}" in
+            refs/tags/v*) ref="${GITHUB_REF#refs/tags/}" ;;
+          esac
+          url="https://raw.githubusercontent.com/Keshab1997/flutter-builder/${ref}/scripts/check_toolchain.py"
           if ! curl -fsSL "$url" -o "$checker"; then
             echo "::notice::toolchain check skipped: could not fetch $url"
             exit 0
@@ -945,7 +953,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.18.3
+          ref: v1.18.4
           path: .flutter-builder
 
       - name: Pre-flight doctor
