@@ -55,7 +55,7 @@ on:
   workflow_dispatch:
 jobs:
   ci:
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.5
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.6
     with:
       flutter-channel: stable
       working-directory: "."
@@ -392,7 +392,7 @@ class DoctorTests(unittest.TestCase):
             "  workflow_dispatch:\n"
             "jobs:\n"
             "  build:\n"
-            "    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.5\n"
+            "    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.6\n"
             "    with:\n"
             "      flutter-channel: ${{ secrets.CHANNEL }}\n"
             "      build-apk: true\n"
@@ -422,7 +422,7 @@ class DoctorTests(unittest.TestCase):
             "          - aab\n"
             "jobs:\n"
             "  build:\n"
-            "    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.5\n"
+            "    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.6\n"
             "    with:\n"
             "      build-apk: ${{ inputs.format == 'apk' }}\n"
             "      build-aab: ${{ inputs.format == 'aab' }}\n"
@@ -450,7 +450,7 @@ class DoctorTests(unittest.TestCase):
 
     def test_outdated_pin_fails(self) -> None:
         self.write_secrets(SIGNING_SECRETS, "")
-        self.make_app(workflow=CI_WORKFLOW.replace("@v1.18.5", "@v1.2.0"))
+        self.make_app(workflow=CI_WORKFLOW.replace("@v1.18.6", "@v1.2.0"))
         self.commit()
         result = self.run_doctor()
         self.assertEqual(result.returncode, 1)

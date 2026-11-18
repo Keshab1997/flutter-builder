@@ -196,6 +196,17 @@ on:
         required: false
         type: boolean
         default: true
+      toolchain-checker-ref:
+        description: >-
+          Tag (or SHA) the toolchain checker is fetched from. Empty follows
+          main, which is staging here — so an old workflow may run a newer
+          script. Set it to the same tag as the `uses:` pin to make the script
+          match the workflow exactly; the step prints the URL it used either
+          way. Bump scripts rewrite `uses:` refs, not this input, so keep the
+          two in step by hand (or leave it empty and follow main on purpose).
+        required: false
+        type: string
+        default: ""
       require-toolchain-table:
         description: >-
           With check-toolchain on: also fail when the project's Flutter pin has
@@ -517,17 +528,17 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           REQUIRE_TOOLCHAIN_TABLE: ${{ inputs.require-toolchain-table }}
+          TOOLCHAIN_CHECKER_REF: ${{ inputs.toolchain-checker-ref }}
         run: |
           set -uo pipefail
           checker="$RUNNER_TEMP/check_toolchain.py"
-          # Same tag as the `uses:` pin, not main: a consumer must run the
-          # checker that shipped with the workflow it pinned. If the tag is
-          # missing from the raw host (never the case for a release), the
-          # notice below says so and the step stays out of the way.
-          ref="main"
-          case "${GITHUB_REF:-}" in
-            refs/tags/v*) ref="${GITHUB_REF#refs/tags/}" ;;
-          esac
+          # The ref cannot be recovered at run time: inside a reusable
+          # workflow GITHUB_REF is the *caller's* ref, not this file's. So the
+          # ref is an input. Leave it empty to follow main (always the newest
+          # checker) or pin it to the tag in `uses:` so the script matches the
+          # workflow exactly. The echo below says which one ran.
+          ref="${TOOLCHAIN_CHECKER_REF:-}"
+          [ -n "$ref" ] || ref="main"
           url="https://raw.githubusercontent.com/Keshab1997/flutter-builder/${ref}/scripts/check_toolchain.py"
           echo "::group::toolchain checker ($ref)"
           echo "Fetching $url"
@@ -956,7 +967,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.18.5
+          ref: v1.18.6
           path: .flutter-builder
 
       - name: Pre-flight doctor

@@ -281,14 +281,17 @@ class WorkflowWiring(unittest.TestCase):
             workflow, r'python3 "\$checker" --root \.',
             "the fetched checker needs --root . to see the project")
 
-    def test_checker_url_follows_the_pinned_tag(self):
-        # main is staging: a consumer on v1.18.x must run the checker that
-        # shipped with v1.18.x, not whatever landed in main since.
+    def test_checker_ref_is_an_input_not_a_guess(self):
+        # GITHUB_REF inside a reusable workflow is the caller's ref, so it can
+        # never tell us which tag of *this* file ran. v1.18.4 tried and quietly
+        # fetched main; the ref has to be an input instead.
         workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
-        self.assertNotIn(
-            "flutter-builder/main/scripts/check_toolchain.py", workflow,
-            "the checker must be fetched from the pinned tag, not main")
-        self.assertIn("refs/tags/", workflow)
+        self.assertIn("TOOLCHAIN_CHECKER_REF", workflow)
+        self.assertNotIn("GITHUB_REF#refs/tags/", workflow)
+        import yaml  # noqa: PLC0415 - optional dependency
+        data = yaml.safe_load(workflow)
+        spec = (data.get(True) or data.get("on"))["workflow_call"]["inputs"]
+        self.assertEqual(spec["toolchain-checker-ref"]["default"], "")
 
     def test_the_url_used_is_echoed(self):
         # The runner resolves the variable; the log must show which tag was
