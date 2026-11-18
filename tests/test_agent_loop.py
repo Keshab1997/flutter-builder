@@ -96,6 +96,33 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.commits()[0], "docs: sample env")
 
+    # -- a refused run leaves the index as it found it -------------------
+    def test_refused_credential_is_unstaged(self) -> None:
+        """`git add -A` swept in .env; the refusal must sweep it back out."""
+        self.branch("feat/env")
+        (self.repo / ".env").write_text("TOKEN=abc\n", encoding="utf-8")
+        (self.repo / "upload.jks").write_bytes(b"\x00binary")
+        result = self.run_loop("-m", "chore: env", "--no-push", "--no-preflight")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=self.repo,
+            text=True, capture_output=True, check=True).stdout.split()
+        self.assertEqual(staged, [])
+
+    def test_refusal_keeps_pre_staged_safe_state(self) -> None:
+        """Only the newly staged forbidden paths are unstaged."""
+        self.branch("feat/mixed")
+        (self.repo / "safe.txt").write_text("safe\n", encoding="utf-8")
+        self.git("add", "safe.txt")
+        (self.repo / ".env").write_text("TOKEN=abc\n", encoding="utf-8")
+        result = self.run_loop("-m", "chore: mixed", "--no-push", "--no-preflight")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=self.repo,
+            text=True, capture_output=True, check=True).stdout.split()
+        self.assertIn("safe.txt", staged)
+        self.assertNotIn(".env", staged)
+
     # -- pack artifacts are local evidence, never source ------------------
     def _make_artifacts(self) -> None:
         shots = self.repo / ".agent-screens" / "local"

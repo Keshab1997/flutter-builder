@@ -70,9 +70,11 @@ FUNCTION_RE = re.compile(
     r"(?m)^[ \t]*(?:static\s+)?(?:Future<[^>]*>|void|int|double|bool|String|"
     r"Widget|List<[^>]*>|Map<[^>]*>|[A-Z]\w*(?:<[^>]*>)?\??)\s+(_\w+)\s*\(")
 
+# `import` only: a barrel `export '...' show Foo;` is not an unused import when
+# Foo is not referenced locally, and flagging it would be a false positive.
+# Cross-file resolution still uses IMPORT_OR_EXPORT_RE below, which keeps both.
 IMPORT_RE = re.compile(
-    r"(?m)^\s*(?P<keyword>import|export)\s+[\"'](?P<uri>[^\"']+)[\"']"
-    r"(?P<tail>[^;]*);")
+    r"(?m)^\s*import\s+[\"'](?P<uri>[^\"']+)[\"'](?P<tail>[^;]*);")
 
 # Comments only; `blanked()` also removes string literals and is therefore
 # unusable for import scanning. See without_comments().
@@ -164,9 +166,9 @@ def optional_named_params(params: str) -> list[str]:
     for p in split_params(section):
         if not p or p.startswith("@") or "required" in p:
             continue
-        if re.match(r"super\.", p):
-            # `super.key` is forwarded to the superclass, not an optional slot
-            # of this class; the analyzer never reports it.
+        if re.search(r"\bsuper\.", p):
+            # `super.key` (and typed forms like `Key? super.key`) is forwarded
+            # to the superclass, not an optional slot of this class.
             continue
         m = re.search(r"\bthis\.(\w+)", p)
         if m:
@@ -263,17 +265,16 @@ def check_imports(path: pathlib.Path, text: str) -> list[str]:
     problems: list[str] = []
     for im in IMPORT_RE.finditer(text):
         line = line_of(text, im.start())
-        keyword = im.group("keyword")
         alias, shown = import_tail(im.group("tail"))
         # Look for uses outside the statement itself, so a name that also occurs
         # in the URI (`thing` in `thing.dart`) cannot count as a use.
         rest = text[:im.start()] + text[im.end():]
         if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", rest):
-            problems.append(f"{path}:{line}: {keyword} alias '{alias}' is unused "
+            problems.append(f"{path}:{line}: import alias '{alias}' is unused "
                             f"(unused_import)")
         for name in shown:
             if not re.search(rf"\b{re.escape(name)}\b", rest):
-                problems.append(f"{path}:{line}: '{name}' shown in {keyword} "
+                problems.append(f"{path}:{line}: '{name}' shown in import "
                                 f"but unused (unused_import)")
     return problems
 

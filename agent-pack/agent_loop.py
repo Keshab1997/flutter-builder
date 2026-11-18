@@ -43,6 +43,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -125,30 +126,35 @@ def default_branch(root: Path) -> str:
     return "main"
 
 
+def staged_paths(root: Path) -> list[str]:
+    """Currently staged paths (added/copied/modified/renamed)."""
+    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
 def staged_secrets(root: Path) -> list[str]:
     """Staged paths that look like credentials (ignoring .gitignore'd ones)."""
-    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
-    hits: list[str] = []
-    for path in proc.stdout.splitlines():
-        path = path.strip()
-        if not path:
-            continue
-        if any(re.search(pattern, path) for pattern in SECRET_PATTERNS):
-            hits.append(path)
-    return hits
+    return [path for path in staged_paths(root)
+            if any(re.search(pattern, path) for pattern in SECRET_PATTERNS)]
 
 
 def staged_artifacts(root: Path) -> list[str]:
     """Staged paths inside the pack's throwaway artifact directories."""
-    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
-    hits: list[str] = []
-    for path in proc.stdout.splitlines():
-        path = path.strip()
-        if not path:
-            continue
-        if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS):
-            hits.append(path)
-    return hits
+    return [path for path in staged_paths(root)
+            if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS)]
+
+
+def unstage_newly_forbidden(root: Path, already_staged: set[str],
+                            hits: list[str]) -> None:
+    """Unstage forbidden paths this run added, leaving prior state alone.
+
+    `git add -A` sweeps in everything, including a `.env` that was never
+    staged; a refused run must not leave that in the index. Paths that were
+    already staged before this run are the caller's prior state and stay.
+    """
+    newly = [path for path in hits if path not in already_staged]
+    if newly:
+        git("reset", "-q", "--", *newly, cwd=root)
 
 
 def resolve_token(arg: str | None) -> str | None:
@@ -163,7 +169,7 @@ def resolve_token(arg: str | None) -> str | None:
         token = os.environ.get(var, "").strip()
         if token:
             return token
-    if subprocess.run(["which", "gh"], capture_output=True).returncode == 0:
+    if shutil.which("gh"):
         proc = subprocess.run(["gh", "auth", "token"], capture_output=True,
                               text=True, check=False)
         if proc.returncode == 0 and proc.stdout.strip():
@@ -318,7 +324,9 @@ def main(argv: list[str]) -> int:
         else:
             print(f"agent_loop: {script} not found; preflight skipped.")
 
-    # 2. stage.
+    # 2. stage. Remember what was already staged so a refusal can put the
+    # index back the way it found it.
+    already_staged = set(staged_paths(root))
     if args.paths:
         git("add", "--", *args.paths, cwd=root)
     else:
@@ -334,7 +342,7 @@ def main(argv: list[str]) -> int:
     # run must not leave it staged either.
     artifacts = staged_artifacts(root)
     if artifacts and not args.allow_secret_paths:
-        git("reset", "-q", "--", *artifacts, cwd=root)
+        unstage_newly_forbidden(root, already_staged, artifacts)
         print("agent_loop: refusing to stage pack artifacts:", file=sys.stderr)
         for path in artifacts:
             print(f"  {path}", file=sys.stderr)
@@ -346,6 +354,7 @@ def main(argv: list[str]) -> int:
     # 4. secret guard -- before the commit, never after the push.
     hits = staged_secrets(root)
     if hits and not args.allow_secret_paths:
+        unstage_newly_forbidden(root, already_staged, hits)
         print("agent_loop: refusing to commit files that look like credentials:",
               file=sys.stderr)
         for path in hits:

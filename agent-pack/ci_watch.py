@@ -27,10 +27,12 @@ one workflow failed, 2 = could not read state (token/repo/timeout).
 from __future__ import annotations
 
 import argparse
+import calendar
 import gzip
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -44,6 +46,11 @@ LOG_INTEREST = re.compile(
     r"(##\[error\]|error •|warning •|info •|issue found|not formatted|"
     r"would reformat|Expected:|Actual:|FAILED|Failed to|Exception:|: Error:|"
     r"No such file|✗|error:)")
+
+# Conclusions GitHub reports that are not a pass. A `timed_out` or
+# `startup_failure` run is a red branch, not "all green".
+FAILURE_CONCLUSIONS = frozenset(
+    {"failure", "timed_out", "startup_failure", "action_required"})
 
 
 class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
@@ -93,7 +100,7 @@ def resolve_token(arg: str | None) -> str:
         token = os.environ.get(var, "").strip()
         if token:
             return token
-    if subprocess.run(["which", "gh"], capture_output=True).returncode == 0:
+    if shutil.which("gh"):
         try:
             token = subprocess.run(["gh", "auth", "token"], capture_output=True,
                                    text=True, check=True).stdout.strip()
@@ -156,13 +163,40 @@ def interesting_lines(log: str, limit: int = 15) -> list[str]:
     return hits
 
 
-def seconds(iso_a: str, iso_b: str) -> str:
-    try:
-        def parse(s: str) -> float:
-            return time.mktime(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
-        return f"{int(parse(iso_b) - parse(iso_a))}s"
-    except Exception:  # noqa: BLE001 - display only
+def seconds(iso_a: str | None, iso_b: str | None) -> str:
+    """Whole seconds between two ISO-8601 timestamps, in UTC.
+
+    `time.mktime` reads the struct as local time, so a duration spanning a DST
+    change would be off by the UTC offset; `calendar.timegm` treats it as UTC.
+    A missing timestamp is a normal in-progress state, not an error.
+    """
+    if not iso_a or not iso_b:
         return "?"
+    try:
+        def parse(value: str) -> float:
+            return float(calendar.timegm(
+                time.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")))
+        return f"{int(parse(iso_b) - parse(iso_a))}s"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def run_order(run: dict) -> str:
+    """Best-effort timestamp for ordering runs; ISO strings sort lexically."""
+    return (run.get("created_at") or run.get("run_started_at")
+            or run.get("updated_at") or "")
+
+
+def newest_runs(runs: list[dict]) -> list[dict]:
+    """One run per (name, event): the newest.
+
+    A branch accumulates runs; an older failed run that a newer green run
+    superseded must not keep the branch red.
+    """
+    newest: dict[tuple[str, str], dict] = {}
+    for run in sorted(runs, key=run_order):
+        newest[(run.get("name", ""), run.get("event", ""))] = run
+    return list(newest.values())
 
 
 def main() -> int:
@@ -202,12 +236,16 @@ def main() -> int:
     runs: list[dict] = []
     while True:
         runs = api(query, token).get("workflow_runs", [])
+        if args.branch:
+            runs = newest_runs(runs)
         active = [w for w in runs if w.get("status") != "completed"]
-        if runs and (not active or args.once or time.time() >= deadline):
+        if runs and (not active or args.once):
             break
         if not runs and args.once:
             break
         if time.time() >= deadline:
+            # Still active at the deadline is a timeout, not a clean bill of
+            # health: the caller asked for a wait and got an unfinished state.
             print(f"ci_watch: timed out after {args.timeout}s", file=sys.stderr)
             return 2
         if not args.quiet:
@@ -229,8 +267,8 @@ def main() -> int:
     for w in sorted(runs, key=lambda x: (x["name"], x["event"])):
         result = w.get("conclusion") or w.get("status")
         print(f"  {w['name'][:22]:<22} {w['event'][:12]:<12} {str(result):<10} "
-              f"{seconds(w['run_started_at'], w['updated_at'])}")
-        if w.get("conclusion") == "failure":
+              f"{seconds(w.get('run_started_at'), w.get('updated_at'))}")
+        if w.get("conclusion") in FAILURE_CONCLUSIONS:
             failures.append(w)
 
     if not failures:

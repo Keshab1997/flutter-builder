@@ -202,9 +202,11 @@ FUNCTION_RE = re.compile(
     r"(?m)^[ \t]*(?:static\s+)?(?:Future<[^>]*>|void|int|double|bool|String|"
     r"Widget|List<[^>]*>|Map<[^>]*>|[A-Z]\w*(?:<[^>]*>)?\??)\s+(_\w+)\s*\(")
 
+# `import` only: a barrel `export '...' show Foo;` is not an unused import when
+# Foo is not referenced locally, and flagging it would be a false positive.
+# Cross-file resolution still uses IMPORT_OR_EXPORT_RE below, which keeps both.
 IMPORT_RE = re.compile(
-    r"(?m)^\s*(?P<keyword>import|export)\s+[\"'](?P<uri>[^\"']+)[\"']"
-    r"(?P<tail>[^;]*);")
+    r"(?m)^\s*import\s+[\"'](?P<uri>[^\"']+)[\"'](?P<tail>[^;]*);")
 
 # Comments only; `blanked()` also removes string literals and is therefore
 # unusable for import scanning. See without_comments().
@@ -296,9 +298,9 @@ def optional_named_params(params: str) -> list[str]:
     for p in split_params(section):
         if not p or p.startswith("@") or "required" in p:
             continue
-        if re.match(r"super\.", p):
-            # `super.key` is forwarded to the superclass, not an optional slot
-            # of this class; the analyzer never reports it.
+        if re.search(r"\bsuper\.", p):
+            # `super.key` (and typed forms like `Key? super.key`) is forwarded
+            # to the superclass, not an optional slot of this class.
             continue
         m = re.search(r"\bthis\.(\w+)", p)
         if m:
@@ -395,17 +397,16 @@ def check_imports(path: pathlib.Path, text: str) -> list[str]:
     problems: list[str] = []
     for im in IMPORT_RE.finditer(text):
         line = line_of(text, im.start())
-        keyword = im.group("keyword")
         alias, shown = import_tail(im.group("tail"))
         # Look for uses outside the statement itself, so a name that also occurs
         # in the URI (`thing` in `thing.dart`) cannot count as a use.
         rest = text[:im.start()] + text[im.end():]
         if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", rest):
-            problems.append(f"{path}:{line}: {keyword} alias '{alias}' is unused "
+            problems.append(f"{path}:{line}: import alias '{alias}' is unused "
                             f"(unused_import)")
         for name in shown:
             if not re.search(rf"\b{re.escape(name)}\b", rest):
-                problems.append(f"{path}:{line}: '{name}' shown in {keyword} "
+                problems.append(f"{path}:{line}: '{name}' shown in import "
                                 f"but unused (unused_import)")
     return problems
 
@@ -625,10 +626,12 @@ one workflow failed, 2 = could not read state (token/repo/timeout).
 from __future__ import annotations
 
 import argparse
+import calendar
 import gzip
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -642,6 +645,11 @@ LOG_INTEREST = re.compile(
     r"(##\[error\]|error •|warning •|info •|issue found|not formatted|"
     r"would reformat|Expected:|Actual:|FAILED|Failed to|Exception:|: Error:|"
     r"No such file|✗|error:)")
+
+# Conclusions GitHub reports that are not a pass. A `timed_out` or
+# `startup_failure` run is a red branch, not "all green".
+FAILURE_CONCLUSIONS = frozenset(
+    {"failure", "timed_out", "startup_failure", "action_required"})
 
 
 class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
@@ -691,7 +699,7 @@ def resolve_token(arg: str | None) -> str:
         token = os.environ.get(var, "").strip()
         if token:
             return token
-    if subprocess.run(["which", "gh"], capture_output=True).returncode == 0:
+    if shutil.which("gh"):
         try:
             token = subprocess.run(["gh", "auth", "token"], capture_output=True,
                                    text=True, check=True).stdout.strip()
@@ -754,13 +762,40 @@ def interesting_lines(log: str, limit: int = 15) -> list[str]:
     return hits
 
 
-def seconds(iso_a: str, iso_b: str) -> str:
-    try:
-        def parse(s: str) -> float:
-            return time.mktime(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
-        return f"{int(parse(iso_b) - parse(iso_a))}s"
-    except Exception:  # noqa: BLE001 - display only
+def seconds(iso_a: str | None, iso_b: str | None) -> str:
+    """Whole seconds between two ISO-8601 timestamps, in UTC.
+
+    `time.mktime` reads the struct as local time, so a duration spanning a DST
+    change would be off by the UTC offset; `calendar.timegm` treats it as UTC.
+    A missing timestamp is a normal in-progress state, not an error.
+    """
+    if not iso_a or not iso_b:
         return "?"
+    try:
+        def parse(value: str) -> float:
+            return float(calendar.timegm(
+                time.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")))
+        return f"{int(parse(iso_b) - parse(iso_a))}s"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def run_order(run: dict) -> str:
+    """Best-effort timestamp for ordering runs; ISO strings sort lexically."""
+    return (run.get("created_at") or run.get("run_started_at")
+            or run.get("updated_at") or "")
+
+
+def newest_runs(runs: list[dict]) -> list[dict]:
+    """One run per (name, event): the newest.
+
+    A branch accumulates runs; an older failed run that a newer green run
+    superseded must not keep the branch red.
+    """
+    newest: dict[tuple[str, str], dict] = {}
+    for run in sorted(runs, key=run_order):
+        newest[(run.get("name", ""), run.get("event", ""))] = run
+    return list(newest.values())
 
 
 def main() -> int:
@@ -800,12 +835,16 @@ def main() -> int:
     runs: list[dict] = []
     while True:
         runs = api(query, token).get("workflow_runs", [])
+        if args.branch:
+            runs = newest_runs(runs)
         active = [w for w in runs if w.get("status") != "completed"]
-        if runs and (not active or args.once or time.time() >= deadline):
+        if runs and (not active or args.once):
             break
         if not runs and args.once:
             break
         if time.time() >= deadline:
+            # Still active at the deadline is a timeout, not a clean bill of
+            # health: the caller asked for a wait and got an unfinished state.
             print(f"ci_watch: timed out after {args.timeout}s", file=sys.stderr)
             return 2
         if not args.quiet:
@@ -827,8 +866,8 @@ def main() -> int:
     for w in sorted(runs, key=lambda x: (x["name"], x["event"])):
         result = w.get("conclusion") or w.get("status")
         print(f"  {w['name'][:22]:<22} {w['event'][:12]:<12} {str(result):<10} "
-              f"{seconds(w['run_started_at'], w['updated_at'])}")
-        if w.get("conclusion") == "failure":
+              f"{seconds(w.get('run_started_at'), w.get('updated_at'))}")
+        if w.get("conclusion") in FAILURE_CONCLUSIONS:
             failures.append(w)
 
     if not failures:
@@ -911,6 +950,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -993,30 +1033,35 @@ def default_branch(root: Path) -> str:
     return "main"
 
 
+def staged_paths(root: Path) -> list[str]:
+    """Currently staged paths (added/copied/modified/renamed)."""
+    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
 def staged_secrets(root: Path) -> list[str]:
     """Staged paths that look like credentials (ignoring .gitignore'd ones)."""
-    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
-    hits: list[str] = []
-    for path in proc.stdout.splitlines():
-        path = path.strip()
-        if not path:
-            continue
-        if any(re.search(pattern, path) for pattern in SECRET_PATTERNS):
-            hits.append(path)
-    return hits
+    return [path for path in staged_paths(root)
+            if any(re.search(pattern, path) for pattern in SECRET_PATTERNS)]
 
 
 def staged_artifacts(root: Path) -> list[str]:
     """Staged paths inside the pack's throwaway artifact directories."""
-    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
-    hits: list[str] = []
-    for path in proc.stdout.splitlines():
-        path = path.strip()
-        if not path:
-            continue
-        if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS):
-            hits.append(path)
-    return hits
+    return [path for path in staged_paths(root)
+            if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS)]
+
+
+def unstage_newly_forbidden(root: Path, already_staged: set[str],
+                            hits: list[str]) -> None:
+    """Unstage forbidden paths this run added, leaving prior state alone.
+
+    `git add -A` sweeps in everything, including a `.env` that was never
+    staged; a refused run must not leave that in the index. Paths that were
+    already staged before this run are the caller's prior state and stay.
+    """
+    newly = [path for path in hits if path not in already_staged]
+    if newly:
+        git("reset", "-q", "--", *newly, cwd=root)
 
 
 def resolve_token(arg: str | None) -> str | None:
@@ -1031,7 +1076,7 @@ def resolve_token(arg: str | None) -> str | None:
         token = os.environ.get(var, "").strip()
         if token:
             return token
-    if subprocess.run(["which", "gh"], capture_output=True).returncode == 0:
+    if shutil.which("gh"):
         proc = subprocess.run(["gh", "auth", "token"], capture_output=True,
                               text=True, check=False)
         if proc.returncode == 0 and proc.stdout.strip():
@@ -1186,7 +1231,9 @@ def main(argv: list[str]) -> int:
         else:
             print(f"agent_loop: {script} not found; preflight skipped.")
 
-    # 2. stage.
+    # 2. stage. Remember what was already staged so a refusal can put the
+    # index back the way it found it.
+    already_staged = set(staged_paths(root))
     if args.paths:
         git("add", "--", *args.paths, cwd=root)
     else:
@@ -1202,7 +1249,7 @@ def main(argv: list[str]) -> int:
     # run must not leave it staged either.
     artifacts = staged_artifacts(root)
     if artifacts and not args.allow_secret_paths:
-        git("reset", "-q", "--", *artifacts, cwd=root)
+        unstage_newly_forbidden(root, already_staged, artifacts)
         print("agent_loop: refusing to stage pack artifacts:", file=sys.stderr)
         for path in artifacts:
             print(f"  {path}", file=sys.stderr)
@@ -1214,6 +1261,7 @@ def main(argv: list[str]) -> int:
     # 4. secret guard -- before the commit, never after the push.
     hits = staged_secrets(root)
     if hits and not args.allow_secret_paths:
+        unstage_newly_forbidden(root, already_staged, hits)
         print("agent_loop: refusing to commit files that look like credentials:",
               file=sys.stderr)
         for path in hits:
@@ -2749,6 +2797,9 @@ gitignore_path="$repo_root/.gitignore"
 gitignore_action="unchanged"
 missing_gitignore=()
 [ ! -L "$gitignore_path" ] || fail "$gitignore_path is a symlink; refusing to write through it."
+if [ -e "$gitignore_path" ] && [ ! -f "$gitignore_path" ]; then
+  fail "$gitignore_path is not a regular file; refusing to write to it."
+fi
 for entry in ".agent-screens/" ".agent-pack-backups/"; do
   if [ -f "$gitignore_path" ] && grep -qx -F -- "$entry" "$gitignore_path"; then
     continue
@@ -2780,6 +2831,10 @@ if [ "$gitignore_action" = "updated" ]; then
     : > "$gitignore_path"
   fi
   for entry in "${missing_gitignore[@]}"; do
+    # Never glue an entry onto a last line that has no trailing newline.
+    if [ -s "$gitignore_path" ] && [ -n "$(tail -c 1 "$gitignore_path")" ]; then
+      printf '\n' >> "$gitignore_path"
+    fi
     printf '%s\n' "$entry" >> "$gitignore_path"
   done
   say "Updated: .gitignore"

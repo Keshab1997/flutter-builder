@@ -479,6 +479,28 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(outside.read_text(encoding="utf-8"),
                          ".agent-screens/\n.agent-pack-backups/\n")
 
+    def test_directory_gitignore_is_refused(self) -> None:
+        self.flutter_app()
+        (self.repo / ".gitignore").mkdir()
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a regular file", result.stderr)
+
+    def test_gitignore_without_trailing_newline_is_repaired(self) -> None:
+        """An entry must never be glued onto an unterminated last line."""
+        self.flutter_app()
+        (self.repo / ".gitignore").write_text("*.tmp", encoding="utf-8")
+        self.assert_success(self.run_installer())
+        text = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("\n.agent-screens/\n", text)
+        self.assertIn("\n.agent-pack-backups/\n", text)
+        self.assertEqual(text.count(".agent-screens/"), 1)
+        second = self.run_installer()
+        self.assert_success(second)
+        self.assertIn("already installed; nothing changed", second.stdout)
+        self.assertEqual((self.repo / ".gitignore").read_text(encoding="utf-8"),
+                         text)
+
     def test_gitignore_adds_only_the_missing_entries(self) -> None:
         self.flutter_app()
         (self.repo / ".gitignore").write_text(".agent-screens/\n", encoding="utf-8")
@@ -657,6 +679,34 @@ class PreflightToolTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("unused_element_parameter", result.stdout)
 
+    def test_export_show_barrel_is_not_flagged(self) -> None:
+        """A barrel re-export is not an unused import in the importing file."""
+        for line in ("export 'package:demo_app/thing.dart' show Thing;",
+                     'export "package:demo_app/thing.dart" show Thing;'):
+            with self.subTest(line=line):
+                result = self.run_preflight(line + "\n\nclass A {}\n")
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn("unused_import", result.stdout)
+
+    def test_typed_super_parameter_is_ignored(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class Home extends StatelessWidget {
+              const Home();
+              @override
+              Widget build(BuildContext context) => const _Tile();
+            }
+
+            class _Tile extends StatelessWidget {
+              const _Tile({Key? super.key});
+              @override
+              Widget build(BuildContext context) => const SizedBox();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unused_element_parameter", result.stdout)
+
     def test_double_quoted_import_alias_is_reported(self) -> None:
         result = self.run_preflight(textwrap.dedent(
             """\
@@ -681,7 +731,8 @@ class PreflightToolTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("'Thing' shown in import but unused", result.stdout)
 
-    def test_export_alias_is_reported(self) -> None:
+    def test_export_alias_is_not_flagged(self) -> None:
+        """check_imports() is import-only; a barrel re-export is not an import."""
         result = self.run_preflight(textwrap.dedent(
             """\
             export "package:demo_app/thing.dart" as thing;
@@ -689,8 +740,8 @@ class PreflightToolTests(unittest.TestCase):
             class A {}
             """
         ))
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("export alias 'thing' is unused", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("unused_import", result.stdout)
 
     def test_hide_before_show_is_reported(self) -> None:
         """The combinators may legally appear in either order."""
