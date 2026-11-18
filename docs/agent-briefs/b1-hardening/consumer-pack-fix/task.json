@@ -1,0 +1,18 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "B",
+  "task": "consumer-pack-fix",
+  "allowed": [
+    "scripts/bump-consumers.sh",
+    "tests/test_bump_consumers.py"
+  ],
+  "commit": "fix(bump): handle dry-run force, untracked files and errors in --with-agent-pack",
+  "check": {
+    "kind": "pytest",
+    "target": "tests/test_bump_consumers.py"
+  },
+  "arena": {
+    "branch": "arena/63d9ba0d-flutter-builder",
+    "base_sha": "554e438fcaf9479802a5f5ad2548efe454cb508b"
+  }
+}
