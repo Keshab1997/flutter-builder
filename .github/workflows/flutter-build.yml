@@ -512,7 +512,10 @@ jobs:
             echo "::notice::toolchain check skipped: could not fetch $url"
             exit 0
           fi
-          python3 "$checker"
+          # --root . : the checker is fetched into RUNNER_TEMP, so without it
+          # the script would inspect its own directory instead of the project.
+          # working-directory above is the caller's app directory.
+          python3 "$checker" --root .
 
       - name: Install dependencies
         run: flutter pub get

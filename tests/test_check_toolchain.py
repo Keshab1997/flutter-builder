@@ -139,5 +139,22 @@ class ToolchainCheck(unittest.TestCase):
         self.assertEqual(result["constraints"]["agp_min"], "9.1.1")
 
 
+class WorkflowWiring(unittest.TestCase):
+    """The checker is fetched into RUNNER_TEMP, so the step must point it at the
+    project — the first release of this check failed its own consumers because
+    it inspected the temp directory instead."""
+
+    def test_step_passes_root_dot(self):
+        workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
+        self.assertIn("check_toolchain.py --root .", workflow,
+                      "the fetched checker needs --root . to see the project")
+
+    def test_input_is_on_by_default(self):
+        import yaml  # noqa: PLC0415 - optional dependency, only this test
+        data = yaml.safe_load((REPO / ".github/workflows/flutter-build.yml").read_text())
+        spec = (data.get(True) or data.get("on"))["workflow_call"]["inputs"]["check-toolchain"]
+        self.assertTrue(spec["default"])
+
+
 if __name__ == "__main__":
     unittest.main()
