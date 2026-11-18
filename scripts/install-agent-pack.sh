@@ -13,10 +13,10 @@
 #                        only, no `gh` required.
 #   tool/see_screen.py   Have CI photograph a screen and print the image paths,
 #                        so an agent can look at what it changed.
-#   tool/agent_loop.py   One command for the whole loop: preflight, secret
-#                        guard, commit, push, watch. Refuses to commit on the
-#                        default branch or to stage a credential, so an agent
-#                        cannot skip a step by accident.
+#   tool/agent_loop.py   One command for the whole loop: preflight, artifact
+#                        and secret guard, commit, push, watch. Refuses to
+#                        stage a credential or the pack's screenshot/backup
+#                        artifacts, so an agent cannot skip a step by accident.
 #   tool/local_screenshots.py
 #                        Photographs a screen: renders it to a PNG with
 #                        `flutter test`, offline, about a second per screen. No
@@ -176,8 +176,25 @@ import sys
 
 # Comments and string literals are blanked before any matching so that a class
 # name inside a doc comment cannot count as a use of it. Line numbers survive.
+# Dart has more than one string shape, and each must be blanked as a unit:
+#   * raw strings (`r'...'`, `r"..."`) - a backslash is literal there, so it
+#     does NOT escape the closing quote;
+#   * triple-quoted strings (`'''...'''`, `"""..."""`), which span lines; a
+#     lone quote inside them is just a character.
+# Order matters: triple-quoted before single-line, raw before ordinary.
 COMMENT_OR_STRING = re.compile(
-    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'", re.S)
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r"|[rR]'''(?:[^']|'(?!''))*?'''"
+    r'|[rR]"""(?:[^"]|"(?!""))*?"""'
+    r"|[rR]'[^'\n]*'"
+    r'|[rR]"[^"\n]*"'
+    r"|'''(?:\\[\s\S]|[^']|'(?!''))*?'''"
+    r'|"""(?:\\[\s\S]|[^"]|"(?!""))*?"""'
+    r"|'(?:\\[\s\S]|[^'\\\n])*'"
+    r'|"(?:\\[\s\S]|[^"\\\n])*"',
+    re.S,
+)
 
 # Return types this script bothers to look at for private functions. Dart has
 # more, but a miss here only means one fewer advisory line.
@@ -186,7 +203,8 @@ FUNCTION_RE = re.compile(
     r"Widget|List<[^>]*>|Map<[^>]*>|[A-Z]\w*(?:<[^>]*>)?\??)\s+(_\w+)\s*\(")
 
 IMPORT_RE = re.compile(
-    r"(?m)^\s*import\s+'([^']+)'\s*(?:as\s+(\w+))?\s*(?:show\s+([^;]+))?;")
+    r"(?m)^\s*(?P<keyword>import|export)\s+[\"'](?P<uri>[^\"']+)[\"']"
+    r"(?P<tail>[^;]*);")
 
 # Comments only; `blanked()` also removes string literals and is therefore
 # unusable for import scanning. See without_comments().
@@ -278,6 +296,10 @@ def optional_named_params(params: str) -> list[str]:
     for p in split_params(section):
         if not p or p.startswith("@") or "required" in p:
             continue
+        if re.match(r"super\.", p):
+            # `super.key` is forwarded to the superclass, not an optional slot
+            # of this class; the analyzer never reports it.
+            continue
         m = re.search(r"\bthis\.(\w+)", p)
         if m:
             names.append(m.group(1))
@@ -340,29 +362,51 @@ def check_private_functions(path: pathlib.Path, text: str) -> list[str]:
                     break
         if params_close is None:
             continue
-        after = text[fm.end() + params_close:]
-        if not re.match(r"\s*(?:async\s*)?\{", after):
+        # `params_close` is the index of the closing `)`, so the body starts one
+        # character later; starting at `)` made every definition look abstract.
+        body_start = fm.end() + params_close + 1
+        after = text[body_start:]
+        if not re.match(r"\s*(?:(?:async|sync)\s*\*?\s*)?(?:\{|=>)", after):
             continue  # abstract / declaration only, not a definition
-        body_start = fm.end() + params_close
-        if not re.search(rf"\b{re.escape(fn)}\b", text[body_start:]):
+        # Search everywhere except the declaration itself: Dart lets a function
+        # be used above its definition, and a recursive call counts as a use.
+        rest = text[:fm.start()] + text[fm.end():]
+        if not re.search(rf"\b{re.escape(fn)}\b", rest):
             problems.append(f"{path}:{line_of(text, fm.start())}: private "
                             f"function {fn} is never used (unused_element)")
     return problems
+
+
+def import_tail(tail: str) -> tuple[str | None, list[str]]:
+    """`as` alias and `show` names from an import/export clause.
+
+    `hide` may legally come before `show`, so the combinators are read in order
+    instead of assuming one fixed position.
+    """
+    alias_match = re.search(r"\bas\s+(\w+)", tail)
+    alias = alias_match.group(1) if alias_match else None
+    shown: list[str] = []
+    for cm in re.finditer(r"\bshow\s+([^;]+?)(?=\s+(?:show|hide)\b|$)", tail):
+        shown += [n.strip() for n in cm.group(1).split(",") if n.strip()]
+    return alias, shown
 
 
 def check_imports(path: pathlib.Path, text: str) -> list[str]:
     problems: list[str] = []
     for im in IMPORT_RE.finditer(text):
         line = line_of(text, im.start())
-        alias, shown = im.group(2), im.group(3)
-        if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", text):
-            problems.append(f"{path}:{line}: import alias '{alias}' is unused "
+        keyword = im.group("keyword")
+        alias, shown = import_tail(im.group("tail"))
+        # Look for uses outside the statement itself, so a name that also occurs
+        # in the URI (`thing` in `thing.dart`) cannot count as a use.
+        rest = text[:im.start()] + text[im.end():]
+        if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", rest):
+            problems.append(f"{path}:{line}: {keyword} alias '{alias}' is unused "
                             f"(unused_import)")
-        if shown:
-            for name in (n.strip() for n in shown.split(",")):
-                if name and len(re.findall(rf"\b{re.escape(name)}\b", text)) < 2:
-                    problems.append(f"{path}:{line}: '{name}' shown in import "
-                                    f"but unused (unused_import)")
+        for name in shown:
+            if not re.search(rf"\b{re.escape(name)}\b", rest):
+                problems.append(f"{path}:{line}: '{name}' shown in {keyword} "
+                                f"but unused (unused_import)")
     return problems
 
 
@@ -406,7 +450,8 @@ def check_private_fields(path: pathlib.Path, raw: str, text: str) -> list[str]:
     return problems
 
 
-IMPORT_OR_EXPORT_RE = re.compile(r"(?m)^\s*(?:import|export)\s+'([^']+)'")
+IMPORT_OR_EXPORT_RE = re.compile(
+    r"(?m)^\s*(?:import|export)\s+[\"']([^\"']+)[\"']")
 DECL_RE = re.compile(r"(?m)^\s*(?:abstract\s+)?(?:class|enum|mixin|"
                      r"extension|typedef)\s+([A-Z]\w*)")
 
@@ -848,6 +893,10 @@ What it refuses to do, on purpose:
     `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
     unless `--allow-secret-paths` is given: the playbook says secrets never
     enter git, and a pre-commit refusal is cheaper than a history rewrite;
+  * stage the pack's throwaway artifacts (`.agent-screens/`,
+    `.agent-pack-backups/`, `.flutter-builder-backups/`) unless
+    `--allow-secret-paths` is given: they are local evidence, not source, and a
+    refused run unstages them again so nothing is left in the index;
   * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
     given: those findings are exactly what turns a push red.
 
@@ -883,6 +932,15 @@ SECRET_PATTERNS = [
     r"(^|/)GoogleService-Info\.plist$",
     r"(^|/)secrets/",
     r"(^|/)service-account.*\.json$",
+]
+
+# The pack's own output directories: screenshots and replaced-file backups.
+# They are git-ignored on install (see scripts/install-agent-pack.sh) and are
+# evidence, never source, so a run must not sweep them into a commit.
+ARTIFACT_PATTERNS = [
+    r"(^|/)\.agent-screens/",
+    r"(^|/)\.agent-pack-backups/",
+    r"(^|/)\.flutter-builder-backups/",
 ]
 
 DEFAULT_BRANCHES = ("main", "master")
@@ -948,6 +1006,19 @@ def staged_secrets(root: Path) -> list[str]:
     return hits
 
 
+def staged_artifacts(root: Path) -> list[str]:
+    """Staged paths inside the pack's throwaway artifact directories."""
+    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
+    hits: list[str] = []
+    for path in proc.stdout.splitlines():
+        path = path.strip()
+        if not path:
+            continue
+        if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS):
+            hits.append(path)
+    return hits
+
+
 def resolve_token(arg: str | None) -> str | None:
     """Same order as ci_watch.py: flag, environment, then the GitHub CLI."""
     if arg:
@@ -999,7 +1070,9 @@ def github_repo(root: Path) -> str | None:
     proc = git("remote", "get-url", "origin", cwd=root, check=False)
     if proc.returncode != 0:
         return None
-    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/.]+?)(?:\.git)?$",
+    # Repository names may contain dots (`flutter.bootstrap`); only a trailing
+    # `.git` is stripped.
+    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?$",
                       proc.stdout.strip())
     return f"{match.group('owner')}/{match.group('name')}" if match else None
 
@@ -1125,7 +1198,20 @@ def main(argv: list[str]) -> int:
             print("agent_loop: nothing staged; there is no change to commit.")
             return 2
 
-    # 3. secret guard -- before the commit, never after the push.
+    # 3. artifact guard -- local output must not be committed, and a refused
+    # run must not leave it staged either.
+    artifacts = staged_artifacts(root)
+    if artifacts and not args.allow_secret_paths:
+        git("reset", "-q", "--", *artifacts, cwd=root)
+        print("agent_loop: refusing to stage pack artifacts:", file=sys.stderr)
+        for path in artifacts:
+            print(f"  {path}", file=sys.stderr)
+        print("  Add them to .gitignore (they are local evidence), or pass "
+              "--allow-secret-paths if they are safe by design.",
+              file=sys.stderr)
+        return 2
+
+    # 4. secret guard -- before the commit, never after the push.
     hits = staged_secrets(root)
     if hits and not args.allow_secret_paths:
         print("agent_loop: refusing to commit files that look like credentials:",
@@ -1137,7 +1223,7 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
-    # 4. commit.
+    # 5. commit.
     if args.amend:
         cmd = ["commit", "--amend", "--no-edit"] if not args.message \
             else ["commit", "--amend", "-m", args.message]
@@ -1152,7 +1238,7 @@ def main(argv: list[str]) -> int:
         print("agent_loop: --no-push; stopped after the commit.")
         return 0
 
-    # 5. push. An amended commit needs --force-with-lease: plain --force would
+    # 6. push. An amended commit needs --force-with-lease: plain --force would
     # risk clobbering work somebody else pushed to the same branch.
     push = ["push"]
     if args.amend:
@@ -1183,7 +1269,7 @@ def main(argv: list[str]) -> int:
             if not args.ready:
                 print("Draft PRs run no CI; use --ready when you want the run.")
 
-    # 6. watch. CI is manual here, so a push normally starts nothing and waiting
+    # 7. watch. CI is manual here, so a push normally starts nothing and waiting
     # would only time out. --watch opts in when a run is already in flight.
     if not args.watch or args.draft_pr:
         print("agent_loop: done (CI not watched; run it from Actions when ready).")
@@ -2419,7 +2505,7 @@ def find_flutter() -> str:
         "local_screenshots: flutter not found.\n"
         "  Put it on PATH, set FLUTTER_ROOT, or install it:\n"
         "  bash <(curl -fsSL https://raw.githubusercontent.com/Keshab1997/"
-        "flutter-builder/main/scripts/install.sh)"
+        "flutter-bootstrap/main/setup.sh) --quiet --json"
     )
 
 
@@ -2438,7 +2524,12 @@ def known_shots() -> list[str]:
     source = "\n".join(
         line for line in source.splitlines() if not line.lstrip().startswith("//")
     )
-    return re.findall(r"\bname:\s*'([^']+)'", source)
+    # `name:` is a plain Dart argument, so either quote style is legal; the
+    # registry is user-owned and must not silently drop double-quoted shots.
+    return [
+        m.group(1) if m.group(1) is not None else m.group(2)
+        for m in re.finditer(r"\bname:\s*(?:'([^']+)'|\"([^\"]+)\")", source)
+    ]
 
 
 def main() -> int:
@@ -2652,15 +2743,46 @@ case "$agents_action" in
   *) fail "internal error: unexpected AGENTS.md action '$agents_action'." ;;
 esac
 
+# .gitignore: keep the pack's throwaway artifacts out of git. The two entries
+# are added idempotently, so a rerun with both present says nothing at all.
+gitignore_path="$repo_root/.gitignore"
+gitignore_action="unchanged"
+missing_gitignore=()
+[ ! -L "$gitignore_path" ] || fail "$gitignore_path is a symlink; refusing to write through it."
+for entry in ".agent-screens/" ".agent-pack-backups/"; do
+  if [ -f "$gitignore_path" ] && grep -qx -F -- "$entry" "$gitignore_path"; then
+    continue
+  fi
+  missing_gitignore+=("$entry")
+done
+if [ "${#missing_gitignore[@]}" -gt 0 ]; then
+  gitignore_action="updated"
+fi
+
 if [ "${#changes[@]}" -eq 0 ] && [ "${#shot_changes[@]}" -eq 0 ] \
-   && [ "$registry_new" = false ] && [ "$agents_action" = "unchanged" ]; then
+   && [ "$registry_new" = false ] && [ "$agents_action" = "unchanged" ] \
+   && [ "$gitignore_action" = "unchanged" ]; then
   say "Agent pack $PACK_VERSION is already installed; nothing changed."
   exit 0
+fi
+
+if [ "$gitignore_action" = "updated" ]; then
+  say "Will update: .gitignore (ignore .agent-screens/, .agent-pack-backups/)"
 fi
 
 if [ "$dry_run" = true ]; then
   say "Dry run: no files were changed."
   exit 0
+fi
+
+if [ "$gitignore_action" = "updated" ]; then
+  if [ ! -e "$gitignore_path" ]; then
+    : > "$gitignore_path"
+  fi
+  for entry in "${missing_gitignore[@]}"; do
+    printf '%s\n' "$entry" >> "$gitignore_path"
+  done
+  say "Updated: .gitignore"
 fi
 
 if [ "${#conflicts[@]}" -gt 0 ] || [ "${#shot_conflicts[@]}" -gt 0 ]; then
@@ -2738,10 +2860,8 @@ say "  After a push  :  python3 tool/ci_watch.py"
 say "  Whole loop    :  python3 tool/agent_loop.py -m \"fix(x): what changed\""
 say "  A screen      :  python3 tool/local_screenshots.py --list"
 say "                   then: python3 tool/local_screenshots.py --shot home"
-say "  Screenshots land in .agent-screens/ - add that to .gitignore."
+say "  Screenshots and backups are git-ignored (.agent-screens/, .agent-pack-backups/)."
 say "  Pack docs     :  ${RAW_BASE}/README.md"
-if [ ! -e "$repo_root/.agent-pack-backups" ]; then
-  :
-else
-  say "Note: .agent-pack-backups/ holds replaced files; add it to .gitignore."
+if [ -e "$repo_root/.agent-pack-backups" ]; then
+  say "Note: .agent-pack-backups/ holds replaced files (git-ignored)."
 fi

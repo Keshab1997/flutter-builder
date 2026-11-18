@@ -25,6 +25,10 @@ What it refuses to do, on purpose:
     `*.pem`, `key.properties`, `google-services.json`, `secrets/**`, ...)
     unless `--allow-secret-paths` is given: the playbook says secrets never
     enter git, and a pre-commit refusal is cheaper than a history rewrite;
+  * stage the pack's throwaway artifacts (`.agent-screens/`,
+    `.agent-pack-backups/`, `.flutter-builder-backups/`) unless
+    `--allow-secret-paths` is given: they are local evidence, not source, and a
+    refused run unstages them again so nothing is left in the index;
   * push when `tool/preflight.py` reports issues, unless `--no-preflight` is
     given: those findings are exactly what turns a push red.
 
@@ -60,6 +64,15 @@ SECRET_PATTERNS = [
     r"(^|/)GoogleService-Info\.plist$",
     r"(^|/)secrets/",
     r"(^|/)service-account.*\.json$",
+]
+
+# The pack's own output directories: screenshots and replaced-file backups.
+# They are git-ignored on install (see scripts/install-agent-pack.sh) and are
+# evidence, never source, so a run must not sweep them into a commit.
+ARTIFACT_PATTERNS = [
+    r"(^|/)\.agent-screens/",
+    r"(^|/)\.agent-pack-backups/",
+    r"(^|/)\.flutter-builder-backups/",
 ]
 
 DEFAULT_BRANCHES = ("main", "master")
@@ -125,6 +138,19 @@ def staged_secrets(root: Path) -> list[str]:
     return hits
 
 
+def staged_artifacts(root: Path) -> list[str]:
+    """Staged paths inside the pack's throwaway artifact directories."""
+    proc = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", cwd=root)
+    hits: list[str] = []
+    for path in proc.stdout.splitlines():
+        path = path.strip()
+        if not path:
+            continue
+        if any(re.search(pattern, path) for pattern in ARTIFACT_PATTERNS):
+            hits.append(path)
+    return hits
+
+
 def resolve_token(arg: str | None) -> str | None:
     """Same order as ci_watch.py: flag, environment, then the GitHub CLI."""
     if arg:
@@ -176,7 +202,9 @@ def github_repo(root: Path) -> str | None:
     proc = git("remote", "get-url", "origin", cwd=root, check=False)
     if proc.returncode != 0:
         return None
-    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/.]+?)(?:\.git)?$",
+    # Repository names may contain dots (`flutter.bootstrap`); only a trailing
+    # `.git` is stripped.
+    match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?$",
                       proc.stdout.strip())
     return f"{match.group('owner')}/{match.group('name')}" if match else None
 
@@ -302,7 +330,20 @@ def main(argv: list[str]) -> int:
             print("agent_loop: nothing staged; there is no change to commit.")
             return 2
 
-    # 3. secret guard -- before the commit, never after the push.
+    # 3. artifact guard -- local output must not be committed, and a refused
+    # run must not leave it staged either.
+    artifacts = staged_artifacts(root)
+    if artifacts and not args.allow_secret_paths:
+        git("reset", "-q", "--", *artifacts, cwd=root)
+        print("agent_loop: refusing to stage pack artifacts:", file=sys.stderr)
+        for path in artifacts:
+            print(f"  {path}", file=sys.stderr)
+        print("  Add them to .gitignore (they are local evidence), or pass "
+              "--allow-secret-paths if they are safe by design.",
+              file=sys.stderr)
+        return 2
+
+    # 4. secret guard -- before the commit, never after the push.
     hits = staged_secrets(root)
     if hits and not args.allow_secret_paths:
         print("agent_loop: refusing to commit files that look like credentials:",
@@ -314,7 +355,7 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
-    # 4. commit.
+    # 5. commit.
     if args.amend:
         cmd = ["commit", "--amend", "--no-edit"] if not args.message \
             else ["commit", "--amend", "-m", args.message]
@@ -329,7 +370,7 @@ def main(argv: list[str]) -> int:
         print("agent_loop: --no-push; stopped after the commit.")
         return 0
 
-    # 5. push. An amended commit needs --force-with-lease: plain --force would
+    # 6. push. An amended commit needs --force-with-lease: plain --force would
     # risk clobbering work somebody else pushed to the same branch.
     push = ["push"]
     if args.amend:
@@ -360,7 +401,7 @@ def main(argv: list[str]) -> int:
             if not args.ready:
                 print("Draft PRs run no CI; use --ready when you want the run.")
 
-    # 6. watch. CI is manual here, so a push normally starts nothing and waiting
+    # 7. watch. CI is manual here, so a push normally starts nothing and waiting
     # would only time out. --watch opts in when a run is already in flight.
     if not args.watch or args.draft_pr:
         print("agent_loop: done (CI not watched; run it from Actions when ready).")

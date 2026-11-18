@@ -11,6 +11,7 @@ No third-party modules.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import tempfile
 import textwrap
@@ -94,6 +95,62 @@ class AgentLoopTests(unittest.TestCase):
                                "--allow-secret-paths")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.commits()[0], "docs: sample env")
+
+    # -- pack artifacts are local evidence, never source ------------------
+    def _make_artifacts(self) -> None:
+        shots = self.repo / ".agent-screens" / "local"
+        shots.mkdir(parents=True)
+        (shots / "home.png").write_bytes(b"\x89PNG")
+        backups = self.repo / ".agent-pack-backups"
+        backups.mkdir()
+        (backups / "preflight.py").write_text("# replaced\n", encoding="utf-8")
+        builder = self.repo / ".flutter-builder-backups"
+        builder.mkdir()
+        (builder / "old.txt").write_text("old\n", encoding="utf-8")
+
+    def test_refuses_pack_artifacts_and_unstages_them(self) -> None:
+        """A refused run must not leave screenshots staged for the next one."""
+        self.branch("feat/shots")
+        self._make_artifacts()
+        result = self.run_loop("-m", "chore: screenshots", "--no-push",
+                               "--no-preflight")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("artifacts", result.stderr)
+        self.assertIn(".agent-screens/local/home.png", result.stderr)
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"], cwd=self.repo,
+            text=True, capture_output=True, check=True).stdout.strip()
+        self.assertEqual(staged, "")
+        self.assertEqual(self.commits(), ["chore: initial"])
+
+    def test_pack_artifacts_can_be_allowed_deliberately(self) -> None:
+        self.branch("feat/shots")
+        self._make_artifacts()
+        result = self.run_loop("-m", "chore: screenshots", "--no-push",
+                               "--no-preflight", "--allow-secret-paths")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.commits()[0], "chore: screenshots")
+        tracked = subprocess.run(
+            ["git", "ls-files", ".agent-screens"], cwd=self.repo,
+            text=True, capture_output=True, check=True).stdout.splitlines()
+        self.assertIn(".agent-screens/local/home.png", tracked)
+
+    def test_github_repo_allows_dots_in_names(self) -> None:
+        spec = importlib.util.spec_from_file_location("agent_loop_under_test",
+                                                      str(LOOP))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for url, expected in (
+            ("https://github.com/Keshab1997/flutter.bootstrap.git",
+             "Keshab1997/flutter.bootstrap"),
+            ("git@github.com:Keshab1997/flutter.bootstrap",
+             "Keshab1997/flutter.bootstrap"),
+            ("https://github.com/owner/repo.git", "owner/repo"),
+        ):
+            with self.subTest(url=url):
+                self.git("remote", "add", "origin", url)
+                self.assertEqual(module.github_repo(self.repo), expected)
+                self.git("remote", "remove", "origin")
 
     def test_preflight_findings_stop_the_loop_before_the_commit(self) -> None:
         self.branch("feat/print")
