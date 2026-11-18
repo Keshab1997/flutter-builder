@@ -45,6 +45,9 @@ Options:
   --repos a,b,c      Update exactly these repositories instead of discovering
                      every repository that references a reusable workflow.
   --dry-run          List what would move without pushing or opening a PR.
+  --with-agent-pack  Also refresh each connected repo's agent pack with
+                     install-agent-pack.sh --force when its root AGENTS.md
+                     already carries the flutter-builder managed block.
   -h, --help         This text.
 
 Environment:
@@ -57,6 +60,7 @@ ref=''
 owner="$DEFAULT_OWNER"
 repos=''
 dry_run=false
+with_agent_pack=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --ref)
@@ -69,10 +73,14 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--repos requires a nonempty value."
       repos="$2"; shift 2 ;;
     --dry-run) dry_run=true; shift ;;
+    --with-agent-pack) with_agent_pack=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option: $1 (try --help)." ;;
   esac
 done
+
+dry_run_args=()
+[ "$dry_run" = true ] && dry_run_args=(--dry-run)
 
 [ -n "$ref" ] || fail "--ref is required (a vX.Y.Z tag; try --help)."
 # Same rule as bump-ref.sh: a version tag or a full commit SHA, so no branch
@@ -180,38 +188,68 @@ while IFS= read -r name; do
     continue
   fi
 
-  if [ "$dry_run" = true ]; then
-    if out="$(cd "$clone" && bash "$BUMP_REF" --ref "$ref" --dry-run 2>&1)"; then
-      changes="$(printf '%s\n' "$out" | grep -c 'would update' || true)"
-      if [ "$changes" -gt 0 ]; then
-        say "$name: would open a PR ($changes file(s))"
-        moved=$((moved + 1))
-      else
-        say "skip $name (already at $ref)"
-        skipped=$((skipped + 1))
-      fi
-    else
-      say "skip $name (no pins to rewrite)"
-      skipped=$((skipped + 1))
-    fi
-    continue
-  fi
-
-  if ! out="$(cd "$clone" && bash "$BUMP_REF" --ref "$ref" 2>&1)"; then
+  # Rewrite the workflow pins. In dry-run mode bump-ref only reports; in
+  # real mode the working tree diff tells us whether anything changed.
+  if ! out="$(cd "$clone" && bash "$BUMP_REF" --ref "$ref" "${dry_run_args[@]}" 2>&1)"; then
     say "skip $name (no pins to rewrite)"
     skipped=$((skipped + 1))
     continue
   fi
-  if git -C "$clone" diff --quiet -- .github/workflows; then
+
+  workflows_changed=false
+  pack_changed=false
+
+  if [ "$dry_run" = true ]; then
+    [ "$(printf '%s\n' "$out" | grep -c 'would update' || true)" -gt 0 ] \
+      && workflows_changed=true
+  elif ! git -C "$clone" diff --quiet -- .github/workflows; then
+    workflows_changed=true
+  fi
+
+  # Opt-in agent-pack sync: only repos whose root AGENTS.md already carries
+  # the flutter-builder managed block get the pack; everything else stays
+  # workflow-only. The pack install writes to the clone's working tree and
+  # never commits, so it is safe to combine with the pin bump in one PR.
+  if [ "$with_agent_pack" = true ] && [ -f "$clone/AGENTS.md" ] \
+     && grep -qF '<!-- flutter-builder:agent-pack:start' "$clone/AGENTS.md"; then
+    agent_args=(--force)
+    [ "$dry_run" = true ] && agent_args=(--dry-run)
+    pack_out="$(cd "$clone" && bash "$SCRIPT_DIR/install-agent-pack.sh" "${agent_args[@]}" 2>&1)" || true
+    # Never leave replaced originals behind in the consumer clone.
+    rm -rf -- "$clone/.agent-pack-backups"
+    if [ "$dry_run" = true ]; then
+      printf '%s\n' "$pack_out" | grep -qE 'Will (add|update)' && pack_changed=true
+    else
+      pack_paths=''
+      [ -e "$clone/AGENTS.md" ] && pack_paths="$pack_paths AGENTS.md"
+      [ -d "$clone/tool" ] && pack_paths="$pack_paths tool"
+      [ -e "$clone/.gitignore" ] && pack_paths="$pack_paths .gitignore"
+      if [ -n "$pack_paths" ] && ! git -C "$clone" diff --quiet -- $pack_paths; then
+        pack_changed=true
+      fi
+    fi
+  fi
+
+  if [ "$workflows_changed" = false ] && [ "$pack_changed" = false ]; then
     say "skip $name (already at $ref)"
     skipped=$((skipped + 1))
     continue
   fi
 
-  files="$(git -C "$clone" diff --name-only -- .github/workflows | tr '\n' ' ')"
+  files="$(git -C "$clone" diff --name-only | tr '\n' ' ')"
   say "$name: ${files% } -> @$ref"
+
+  if [ "$dry_run" = true ]; then
+    say "$name: would open a PR"
+    moved=$((moved + 1))
+    continue
+  fi
+
   git -C "$clone" checkout --quiet -b "$branch"
   git -C "$clone" add -- .github/workflows
+  [ -e "$clone/AGENTS.md" ] && git -C "$clone" add -- AGENTS.md
+  [ -d "$clone/tool" ] && git -C "$clone" add -- tool
+  [ -e "$clone/.gitignore" ] && git -C "$clone" add -- .gitignore
   git -C "$clone" commit --quiet -m "chore(ci): bump flutter-builder to ${ref}"
 
   # Re-running updates the branch (and therefore the open PR) instead of
@@ -224,13 +262,22 @@ while IFS= read -r name; do
     continue
   fi
 
+  body="$(pr_body)"
+  if [ "$pack_changed" = true ]; then
+    body="$body
+The agent pack was also refreshed in this pull request:
+install-agent-pack.sh --force ran inside the clone, so the
+flutter-builder:agent-pack block in AGENTS.md and the files under tool/ now
+match the pack shipped with this flutter-builder release."
+  fi
+
   url="$(gh pr list --repo "$owner/$name" --head "$branch" --state open \
            --json url --jq '.[0].url // ""' 2>/dev/null || true)"
   if [ -n "$url" ]; then
     say "refreshed the open PR: $url"
   elif url="$(gh pr create --repo "$owner/$name" --base "$base" --head "$branch" \
                  --title "chore(ci): bump flutter-builder to ${ref}" \
-                 --body "$(pr_body)" 2>&1)"; then
+                 --body "$body" 2>&1)"; then
     say "opened: $url"
   else
     say "FAILED $name (could not open a PR: $url)"
@@ -257,7 +304,7 @@ while IFS= read -r name; do
       say "$name: warn (could not close/delete $head_ref)"
     fi
   done < <(gh api "repos/$owner/$name/pulls?state=open&per_page=100" \
-             --jq '.[] | [.number, .html_url, .head.ref] | @tsv' 2>/dev/null || true)
+             --jq '.[] | select(.head.repo.full_name == .base.repo.full_name) | [.number, .html_url, .head.ref] | @tsv' 2>/dev/null || true)
 done < <(list_repos)
 
 if [ "$dry_run" = true ]; then

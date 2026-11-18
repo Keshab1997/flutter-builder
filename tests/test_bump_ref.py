@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -169,6 +170,47 @@ class BumpRefTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("No .github/workflows", result.stderr)
+
+    def test_refuses_symlinked_github_dir(self) -> None:
+        target = Path(self.temp.name) / "elsewhere"
+        (target / ".github" / "workflows").mkdir(parents=True)
+        (target / ".github" / "workflows" / "ci.yml").write_text(CUSTOM_CI, encoding="utf-8")
+        shutil.rmtree(self.repo / ".github")
+        (self.repo / ".github").symlink_to(target / ".github")
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(
+            (target / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+            CUSTOM_CI,
+        )
+
+    def test_refuses_symlinked_workflows_dir(self) -> None:
+        shutil.rmtree(self.repo / ".github")
+        (self.repo / ".github").mkdir()
+        target = Path(self.temp.name) / "elsewhere" / "workflows"
+        target.mkdir(parents=True)
+        (target / "ci.yml").write_text(CUSTOM_CI, encoding="utf-8")
+        (self.repo / ".github" / "workflows").symlink_to(target)
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual((target / "ci.yml").read_text(encoding="utf-8"), CUSTOM_CI)
+
+    def test_refuses_symlinked_workflow_file(self) -> None:
+        target = Path(self.temp.name) / "target.yml"
+        target.write_text(
+            "uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.6\n",
+            encoding="utf-8",
+        )
+        (self.repo / ".github" / "workflows" / "ci.yml").symlink_to(target)
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            "uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.8.6\n",
+        )
 
     def test_help_works_anywhere(self) -> None:
         result = self.run_tool("--help", piped=True)
