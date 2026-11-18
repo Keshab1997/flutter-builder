@@ -14,6 +14,7 @@ import importlib.util
 import io
 import os
 import sys
+import tempfile
 import time
 import unittest
 import urllib.request
@@ -206,10 +207,40 @@ class CiWatchTests(unittest.TestCase):
         with mock.patch.object(self.ci.shutil, "which", return_value=None), \
                 mock.patch.dict(os.environ, {"GITHUB_TOKEN": "",
                                              "GH_TOKEN": ""}), \
+                mock.patch.object(self.ci, "_bootstrap_token",
+                                  return_value=None), \
                 mock.patch.object(self.ci.subprocess, "run",
                                   side_effect=forbidden):
             with self.assertRaises(SystemExit):
                 self.ci.resolve_token(None)
+
+    def test_the_bootstrap_save_is_the_last_resort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("from-bootstrap\n")
+            with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "",
+                                              "GH_TOKEN": ""}), \
+                    mock.patch.object(self.ci, "Path") as home:
+                home.home.return_value = Path(tmp)
+                with mock.patch.object(self.ci.shutil, "which",
+                                       return_value=None):
+                    self.assertEqual(self.ci.resolve_token(None),
+                                     "from-bootstrap")
+
+    def test_an_empty_bootstrap_save_falls_through(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("  \n")
+            with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "",
+                                              "GH_TOKEN": ""}), \
+                    mock.patch.object(self.ci, "Path") as home:
+                home.home.return_value = Path(tmp)
+                with mock.patch.object(self.ci.shutil, "which",
+                                       return_value=None):
+                    with self.assertRaises(SystemExit):
+                        self.ci.resolve_token(None)
 
 
 if __name__ == "__main__":

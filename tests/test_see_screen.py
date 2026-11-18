@@ -13,7 +13,10 @@ Text-level tests plus a `--dry-run` call; no network, no token, no SDK.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -21,7 +24,9 @@ import tempfile
 import time
 import unittest
 import urllib.request
+import zipfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "agent-pack"
@@ -181,19 +186,36 @@ class TokenTests(unittest.TestCase):
                         __import__("os").environ[key] = value
 
     def test_the_error_says_how_to_get_a_token(self) -> None:
-        import os
-        saved = {k: os.environ.pop(k, None) for k in ("GH_TOKEN", "GITHUB_TOKEN")}
-        saved_which = shutil.which
-        shutil.which = lambda name: None  # no gh in this test
-        try:
-            with self.assertRaises(SystemExit) as caught:
-                s.resolve_token(None)
-            self.assertIn("gh auth login", str(caught.exception))
-        finally:
-            shutil.which = saved_which
-            for key, value in saved.items():
-                if value is not None:
-                    os.environ[key] = value
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}), \
+                mock.patch.object(s, "Path") as home:
+            home.home.return_value = Path("/nonexistent-home-for-this-test")
+            with mock.patch.object(s.shutil, "which", return_value=None):
+                with self.assertRaises(SystemExit) as caught:
+                    s.resolve_token(None)
+                self.assertIn("gh auth login", str(caught.exception))
+
+    def test_the_bootstrap_save_is_the_last_resort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("from-bootstrap\n")
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}), \
+                    mock.patch.object(s, "Path") as home:
+                home.home.return_value = Path(tmp)
+                with mock.patch.object(s.shutil, "which", return_value=None):
+                    self.assertEqual(s.resolve_token(None), "from-bootstrap")
+
+    def test_an_empty_bootstrap_save_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("   \n")
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}), \
+                    mock.patch.object(s, "Path") as home:
+                home.home.return_value = Path(tmp)
+                with mock.patch.object(s.shutil, "which", return_value=None):
+                    with self.assertRaises(SystemExit):
+                        s.resolve_token(None)
 
 
 class CommandLineTests(unittest.TestCase):
@@ -220,6 +242,212 @@ class CommandLineTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 s.main(["--route", "/", "--dry-run"], cwd=Path(tmp))
         self.assertIn("--repo", str(caught.exception))
+
+
+class EpochTests(unittest.TestCase):
+    def test_epoch_is_utc_across_a_dst_change(self) -> None:
+        old = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "America/New_York"
+            time.tzset()
+            if time.timezone != 18000:  # EST is five hours west of UTC
+                self.skipTest("America/New_York tzdata is unavailable")
+            # Three hours in UTC; the old local-time math said two.
+            self.assertEqual(
+                s._epoch("2026-03-08T04:00:00Z") - s._epoch("2026-03-08T01:00:00Z"),
+                3 * 3600.0)
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
+
+    def test_epoch_handles_missing_and_malformed_timestamps(self) -> None:
+        self.assertEqual(s._epoch(None), 0.0)
+        self.assertEqual(s._epoch(""), 0.0)
+        self.assertEqual(s._epoch("not-a-time"), 0.0)
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_the_default_workflow_is_ui_screenshots(self) -> None:
+        self.assertEqual(s.WORKFLOW_FILE, "ui-screenshots.yml")
+
+    def test_find_run_queries_the_workflow_scoped_endpoint(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def fake_api(method, path, token, payload=None, raw=False, timeout=60):
+            calls.append((method, path))
+            return {"workflow_runs": [{
+                "id": 9, "event": "workflow_dispatch",
+                "display_title": "see note",
+                "created_at": "2026-01-01T00:00:00Z"}]}
+
+        with mock.patch.object(s, "api", side_effect=fake_api), \
+                mock.patch.object(s.time, "sleep", return_value=None):
+            run = s.find_run("o/r", "see note", time.time() - 60, "t",
+                             workflow="my-flow.yml")
+        self.assertEqual(run["id"], 9)
+        self.assertIn("/actions/workflows/my-flow.yml/runs", calls[0][1])
+        self.assertIn("event=workflow_dispatch", calls[0][1])
+
+    def test_dry_run_reports_the_requested_workflow(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = s.main(["--dry-run", "--repo", "o/r",
+                          "--workflow", "custom.yml"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())["workflow"], "custom.yml")
+
+
+class JsonModeTests(unittest.TestCase):
+    def capture_run(self, *argv: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / "shot.png"
+            png.write_bytes(b"\x89PNG")
+            run = {"id": 1, "html_url": "https://github.com/o/r/actions/runs/1",
+                   "conclusion": "success", "status": "completed"}
+            with mock.patch.object(s, "resolve_token", return_value="t"), \
+                    mock.patch.object(s, "default_branch", return_value="main"), \
+                    mock.patch.object(s, "dispatch", return_value=None), \
+                    mock.patch.object(s, "find_run", return_value=run), \
+                    mock.patch.object(s, "wait_for_run", return_value=run), \
+                    mock.patch.object(s, "fetch_artifact", return_value=[png]), \
+                    mock.patch.object(s, "screen_dirs", return_value=Path(tmp)), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                code = s.main(["--repo", "o/r", "--route", "/settings", *argv])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_json_keeps_stdout_parseable(self) -> None:
+        code, out, err = self.capture_run("--json")
+        self.assertEqual(code, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["routes"], ["/settings"])
+        self.assertIn("asked", err)
+
+    def test_progress_goes_to_stdout_without_json(self) -> None:
+        code, out, err = self.capture_run()
+        self.assertEqual(code, 0)
+        self.assertIn("image(s)", out)
+        self.assertEqual(err, "")
+
+
+class ArtifactTests(unittest.TestCase):
+    @staticmethod
+    def zip_bytes(path: Path, entries: list[tuple[str, bytes, int | None]]) -> bytes:
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, data, mode in entries:
+                if mode is None:
+                    zf.writestr(name, data)
+                else:
+                    info = zipfile.ZipInfo(name)
+                    info.external_attr = mode << 16
+                    zf.writestr(info, data)
+        return path.read_bytes()
+
+    def fetch(self, tmp: str, blob: bytes) -> list[Path]:
+        out = Path(tmp) / "out"
+        out.mkdir()
+        artifacts = {"artifacts": [
+            {"id": 1, "name": "ui-screenshots", "expired": False}]}
+
+        def fake_api(method, path, token, payload=None, raw=False, timeout=60):
+            if path.endswith("/artifacts"):
+                return artifacts
+            return blob
+
+        with mock.patch.object(s, "api", side_effect=fake_api):
+            return s.fetch_artifact("o/r", {"id": 9, "html_url": "u"}, out, "t")
+
+    def test_expired_is_skipped_and_the_named_artifact_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.mkdir()
+            zip_a = self.zip_bytes(Path(tmp) / "a.zip", [("a.png", b"a", None)])
+            zip_b = self.zip_bytes(Path(tmp) / "b.zip", [("b.png", b"b", None)])
+            artifacts = {"artifacts": [
+                {"id": 1, "name": "other", "expired": False},
+                {"id": 2, "name": "ui-screenshots", "expired": False},
+                {"id": 3, "name": "expired-one", "expired": True},
+            ]}
+
+            def fake_api(method, path, token, payload=None, raw=False, timeout=60):
+                if path.endswith("/artifacts"):
+                    return artifacts
+                if path.endswith("/artifacts/1/zip"):
+                    return zip_a
+                if path.endswith("/artifacts/2/zip"):
+                    return zip_b
+                raise AssertionError(path)
+
+            with mock.patch.object(s, "api", side_effect=fake_api):
+                images = s.fetch_artifact("o/r", {"id": 9, "html_url": "u"},
+                                          out, "t")
+            self.assertEqual([p.name for p in images], ["b.png"])
+            self.assertFalse((out / "a.png").exists())
+
+    def test_directory_and_symlink_members_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            blob = self.zip_bytes(Path(tmp) / "z.zip", [
+                ("dir/", b"", None),
+                ("real.png", b"r", None),
+                ("link.png", b"real.png", 0o120777),
+            ])
+            images = self.fetch(tmp, blob)
+            self.assertEqual([p.name for p in images], ["real.png"])
+            self.assertFalse((Path(tmp) / "out" / "link.png").exists())
+            self.assertFalse((Path(tmp) / "out" / "dir").exists())
+
+    def test_a_zip_path_escape_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            blob = self.zip_bytes(Path(tmp) / "z.zip", [
+                ("../escaped.png", b"x", None),
+                ("ok.png", b"y", None),
+            ])
+            images = self.fetch(tmp, blob)
+            self.assertEqual([p.name for p in images], ["ok.png"])
+            self.assertFalse((Path(tmp) / "escaped.png").exists())
+
+
+class ApiHeadersTests(unittest.TestCase):
+    def test_get_has_no_content_type_but_post_does(self) -> None:
+        class FakeResponse:
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        class FakeOpener:
+            def __init__(self):
+                self.requests: list[urllib.request.Request] = []
+
+            def open(self, req, timeout=60):
+                self.requests.append(req)
+                return FakeResponse()
+
+        opener = FakeOpener()
+        with mock.patch.object(s, "_opener", return_value=opener):
+            s.api("GET", "/x", "t")
+            s.api("POST", "/y", "t", {"a": 1})
+        self.assertNotIn("Content-type", opener.requests[0].headers)
+        self.assertEqual(opener.requests[1].headers.get("Content-type"),
+                         "application/json")
+
+    def test_cross_host_redirect_clears_both_header_maps(self) -> None:
+        handler = s._StripAuthOnHostChange()
+        req = urllib.request.Request("https://api.github.com/a")
+        req.add_header("Authorization", "Bearer sekrit")
+        redirected = handler.redirect_request(
+            req, None, 302, "Found", {},
+            "https://objects.githubusercontent.com/signed/thing")
+        self.assertIsNotNone(redirected)
+        self.assertNotIn("Authorization", redirected.headers)
+        self.assertNotIn("Authorization", redirected.unredirected_hdrs)
 
 
 if __name__ == "__main__":

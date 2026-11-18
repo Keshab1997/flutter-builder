@@ -48,11 +48,13 @@ Honest limits
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import random
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -128,9 +130,19 @@ def pick_run(runs: list[dict], note: str, not_before: float) -> dict | None:
 
 
 def _epoch(stamp: str | None) -> float:
+    """Seconds since the epoch for a GitHub UTC timestamp, or 0.0.
+
+    `time.mktime` reads the struct as local time and `time.timezone` is only the
+    standard-time offset, so the old `mktime(...) - time.timezone` shifted by an
+    hour across a DST boundary. `calendar.timegm` treats the fields as UTC.
+    """
     if not stamp:
         return 0.0
-    return time.mktime(time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+    try:
+        return float(calendar.timegm(
+            time.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ")))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def summarise_manifest(path: Path) -> list[dict]:
@@ -164,7 +176,8 @@ class _StripAuthOnHostChange(urllib.request.HTTPRedirectHandler):
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None and (urllib.parse.urlsplit(newurl).hostname
                                 != urllib.parse.urlsplit(req.full_url).hostname):
-            new.remove_header("Authorization")
+            new.headers.pop("Authorization", None)
+            new.unredirected_hdrs.pop("Authorization", None)
         return new
 
 
@@ -175,13 +188,16 @@ def _opener() -> urllib.request.OpenerDirector:
 def api(method: str, path: str, token: str, payload: dict | None = None,
         raw: bool = False, timeout: int = 60):
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(API + path, data=data, method=method, headers={
+    headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "flutter-builder-see-screen",
-        "Content-Type": "application/json",
-    })
+    }
+    if data is not None:  # a bodyless GET has no Content-Type
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(API + path, data=data, method=method,
+                                 headers=headers)
     try:
         with _opener().open(req, timeout=timeout) as response:
             body = response.read()
@@ -194,6 +210,19 @@ def api(method: str, path: str, token: str, payload: dict | None = None,
         elif exc.code == 404:
             hint = f" (no {WORKFLOW_FILE} in this repository, or no access to it)"
         raise SystemExit(f"see_screen: GitHub said {exc.code}{hint}\n{detail}") from exc
+
+
+def _bootstrap_token() -> str | None:
+    """The token saved by agent-bootstrap, when it left one behind."""
+    try:
+        path = Path.home() / "agent-bootstrap" / "secrets" / "gh_token.txt"
+        if path.is_file():
+            token = path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return None
 
 
 def resolve_token(token_file: str | None) -> str:
@@ -209,6 +238,9 @@ def resolve_token(token_file: str | None) -> str:
         done = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=30)
         if done.returncode == 0 and done.stdout.strip():
             return done.stdout.strip()
+    bootstrap = _bootstrap_token()
+    if bootstrap:
+        return bootstrap
     raise SystemExit(
         "see_screen: no GitHub token.\n"
         "  Run `gh auth login`, or export GH_TOKEN=... (needs Actions: write on "
@@ -218,8 +250,10 @@ def resolve_token(token_file: str | None) -> str:
 # --------------------------------------------------------------------------
 # the steps
 # --------------------------------------------------------------------------
-def dispatch(repo: str, ref: str, inputs: dict, token: str) -> None:
-    api("POST", f"/repos/{repo}/actions/workflows/{WORKFLOW_FILE}/dispatches",
+def dispatch(repo: str, ref: str, inputs: dict, token: str,
+             workflow: str = WORKFLOW_FILE) -> None:
+    quoted = urllib.parse.quote(workflow, safe="")
+    api("POST", f"/repos/{repo}/actions/workflows/{quoted}/dispatches",
         token, {"ref": ref, "inputs": inputs})
 
 
@@ -228,30 +262,36 @@ def default_branch(repo: str, token: str) -> str:
 
 
 def find_run(repo: str, note: str, not_before: float, token: str,
-             timeout: float = 120.0) -> dict:
+             workflow: str = WORKFLOW_FILE, timeout: float = 120.0) -> dict:
     deadline = time.time() + timeout
+    quoted = urllib.parse.quote(workflow, safe="")
+    path = (f"/repos/{repo}/actions/workflows/{quoted}/runs"
+            f"?event=workflow_dispatch&per_page=20")
     while True:
-        runs = api("GET", f"/repos/{repo}/actions/runs?event=workflow_dispatch&per_page=20",
-                   token).get("workflow_runs", [])
+        runs = api("GET", path, token).get("workflow_runs", [])
         run = pick_run(runs, note, not_before)
         if run:
             return run
         if time.time() > deadline:
             raise SystemExit(
                 f"see_screen: dispatched, but no run appeared within {int(timeout)}s.\n"
-                f"  Check https://github.com/{repo}/actions/workflows/{WORKFLOW_FILE}")
+                f"  Check https://github.com/{repo}/actions/workflows/{workflow}")
         time.sleep(5)
 
 
 def wait_for_run(repo: str, run: dict, token: str, timeout: float,
-                 report: bool = True) -> dict:
+                 report: bool = True, notify=None) -> dict:
     started = time.time()
     last = ""
     while True:
         run = api("GET", f"/repos/{repo}/actions/runs/{run['id']}", token)
         state = run.get("conclusion") or run.get("status")
         if report and state != last:
-            print(f"see_screen: run {run['id']} -> {state}  ({run['html_url']})")
+            message = f"see_screen: run {run['id']} -> {state}  ({run['html_url']})"
+            if notify is not None:
+                notify(message)
+            else:
+                print(message)
             last = state
         if run.get("status") == "completed":
             return run
@@ -269,20 +309,28 @@ def failed_steps(repo: str, run_id: int, token: str) -> list[str]:
 
 
 def fetch_artifact(repo: str, run: dict, out: Path, token: str) -> list[Path]:
-    artifacts = api("GET", f"/repos/{repo}/actions/runs/{run['id']}/artifacts",
-                    token).get("artifacts", [])
+    artifacts = [a for a in api(
+        "GET", f"/repos/{repo}/actions/runs/{run['id']}/artifacts",
+        token).get("artifacts", []) if not a.get("expired")]
     if not artifacts:
         raise SystemExit(f"see_screen: the run produced no artifact - {run['html_url']}")
-    artifact = artifacts[0]
+    named = [a for a in artifacts if a.get("name") == "ui-screenshots"]
+    artifact = (named or artifacts)[0]
     blob = api("GET", f"/repos/{repo}/actions/artifacts/{artifact['id']}/zip",
                token, raw=True, timeout=180)
     archive = out / "artifact.zip"
     archive.write_bytes(blob)
     with zipfile.ZipFile(archive) as zf:
         for member in zf.namelist():
+            if member.endswith("/"):
+                continue  # directory entry
             target = (out / member).resolve()
-            if out.resolve() in target.parents:  # no path escapes from a zip
-                zf.extract(member, out)
+            if not target.is_relative_to(out.resolve()):
+                continue  # no path escapes from a zip
+            info = zf.getinfo(member)
+            if stat.S_ISLNK(info.external_attr >> 16):
+                continue  # never materialise a zip symlink
+            zf.extract(member, out)
     archive.unlink(missing_ok=True)
     return sorted(p for p in out.glob("*.png"))
 
@@ -312,6 +360,8 @@ def main(argv: list[str] | None = None, cwd: Path | None = None) -> int:
                         help=f"milliseconds to let the app settle (default {DEFAULT_WAIT_MS})")
     parser.add_argument("--dart-defines", dest="dart_defines",
                         help="compile-time defines, one KEY=VALUE per line")
+    parser.add_argument("--workflow", default=WORKFLOW_FILE,
+                        help=f"caller workflow file (default {WORKFLOW_FILE})")
     parser.add_argument("--out", default=DEFAULT_OUT,
                         help=f"where to put the images (default {DEFAULT_OUT})")
     parser.add_argument("--token-file", help="file holding a GitHub token")
@@ -330,33 +380,39 @@ def main(argv: list[str] | None = None, cwd: Path | None = None) -> int:
     if not repo:
         raise SystemExit("see_screen: no --repo and no git origin remote to read one from")
 
+    workflow = args.workflow or WORKFLOW_FILE
+
+    def notify(message: str) -> None:
+        """Progress goes to stderr under --json, so stdout stays parseable."""
+        print(message, file=sys.stderr if args.json else sys.stdout)
+
     nonce = f"{int(time.time())}-{random.randint(1000, 9999)}"
     note = f"see {nonce} {' '.join(routes)}"
     inputs = build_inputs(routes, args, note)
 
     if args.dry_run:
-        print(json.dumps({"repo": repo, "workflow": WORKFLOW_FILE, "inputs": inputs}, indent=2))
+        print(json.dumps({"repo": repo, "workflow": workflow, "inputs": inputs}, indent=2))
         return 0
 
     token = resolve_token(args.token_file)
     ref = args.ref or default_branch(repo, token)
     asked_at = time.time()
-    dispatch(repo, ref, inputs, token)
-    print(f"see_screen: asked {repo} to photograph {', '.join(routes)}")
+    dispatch(repo, ref, inputs, token, workflow)
+    notify(f"see_screen: asked {repo} to photograph {', '.join(routes)}")
 
-    run = find_run(repo, note, asked_at, token)
+    run = find_run(repo, note, asked_at, token, workflow)
     if args.no_wait:
-        print(run["html_url"])
+        notify(run["html_url"])
         return 0
 
-    run = wait_for_run(repo, run, token, args.timeout)
+    run = wait_for_run(repo, run, token, args.timeout, notify=notify)
 
     if run.get("conclusion") != "success":
-        print(f"see_screen: the capture run ended as {run.get('conclusion')}")
+        notify(f"see_screen: the capture run ended as {run.get('conclusion')}")
         for step in failed_steps(repo, run["id"], token):
-            print(f"  failed: {step}")
-        print(f"  {run['html_url']}")
-        print("  next: python3 tool/ci_watch.py   (prints the failing log lines)")
+            notify(f"  failed: {step}")
+        notify(f"  {run['html_url']}")
+        notify("  next: python3 tool/ci_watch.py   (prints the failing log lines)")
         return 1
 
     out = screen_dirs(Path(args.out), routes, fresh=True)

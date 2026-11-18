@@ -157,8 +157,21 @@ def unstage_newly_forbidden(root: Path, already_staged: set[str],
         git("reset", "-q", "--", *newly, cwd=root)
 
 
+def _bootstrap_token() -> str | None:
+    """The token saved by agent-bootstrap, when it left one behind."""
+    try:
+        path = Path.home() / "agent-bootstrap" / "secrets" / "gh_token.txt"
+        if path.is_file():
+            token = path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return None
+
+
 def resolve_token(arg: str | None) -> str | None:
-    """Same order as ci_watch.py: flag, environment, then the GitHub CLI."""
+    """Flag, environment, then the GitHub CLI, then agent-bootstrap's save."""
     if arg:
         try:
             token = Path(arg).read_text(encoding="utf-8").strip()
@@ -174,7 +187,7 @@ def resolve_token(arg: str | None) -> str | None:
                               text=True, check=False)
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()
-    return None
+    return _bootstrap_token()
 
 
 def api_request(method: str, path: str, token: str, payload: dict | None = None):
