@@ -9,8 +9,9 @@ cannot write. Nothing here needs Flutter, network access or the GitHub CLI.
 
 from __future__ import annotations
 
+import json
 import os
-import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -22,6 +23,187 @@ SCRIPT = ROOT / "scripts" / "bump-consumers.sh"
 BUMP_REF = ROOT / "scripts" / "bump-ref.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "bump-consumers.yml"
 
+REAL_GIT = shutil.which("git") or "/usr/bin/git"
+OWNER = "testorg"
+
+# ---------------------------------------------------------------------------
+# Offline fakes
+#
+# FAKE_GH is a scriptable `gh` stand-in: it serves repo discovery, the default
+# branch, workflow contents, the open-PR list, PR creation, PR comments and PR
+# closes from a JSON state file, so the E2E tests below need no network and no
+# real GitHub. FAKE_GIT copies a local fixture repo on `git clone` and makes
+# push/fetch no-ops, delegating everything else to real git.
+# ---------------------------------------------------------------------------
+
+FAKE_GH = r'''#!/usr/bin/env python3
+"""Scriptable fake `gh` for the bump-consumers end-to-end tests."""
+
+import json
+import os
+import sys
+
+STATE_PATH = os.environ["FAKE_GH_STATE"]
+FIXTURES = os.environ["FAKE_GH_FIXTURES"]
+
+
+def load():
+    try:
+        with open(STATE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"repos": [], "open_prs": [], "comments": [], "created": [], "closed": []}
+
+
+def save(state):
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=1)
+    os.replace(tmp, STATE_PATH)
+
+
+def flag_value(args, flag):
+    for i, a in enumerate(args):
+        if a == flag and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def run(state, args):
+    if not args:
+        return
+    cmd = args[0]
+    if cmd == "repo":
+        # gh repo list <owner> --limit 500 --json name,isArchived --jq ...
+        names = state.get("repos", [])
+        sys.stdout.write(("\n".join(names) + "\n") if names else "")
+        return
+    if cmd == "api":
+        path = next((a for a in args[1:] if a.startswith("repos/")), None)
+        if path is None:
+            return
+        base = path.split("?", 1)[0]
+        parts = base.split("/")
+        if len(parts) < 3:
+            return
+        owner, name = parts[1], parts[2]
+        repo = f"{owner}/{name}"
+        jq = flag_value(args, "--jq")
+        if base == f"repos/{owner}/{name}":
+            if jq == ".default_branch":
+                sys.stdout.write("main\n")
+            else:
+                sys.stdout.write(json.dumps({"default_branch": "main"}) + "\n")
+            return
+        if base == f"repos/{owner}/{name}/contents/.github/workflows":
+            wf = os.path.join(FIXTURES, name, ".github", "workflows")
+            for fn in sorted(os.listdir(wf)) if os.path.isdir(wf) else []:
+                if fn.endswith((".yml", ".yaml")):
+                    sys.stdout.write(fn + "\n")
+            return
+        if base.startswith(f"repos/{owner}/{name}/contents/"):
+            filename = base.rsplit("/", 1)[-1]
+            fp = os.path.join(FIXTURES, name, ".github", "workflows", filename)
+            if os.path.isfile(fp):
+                sys.stdout.write(open(fp, encoding="utf-8").read())
+            return
+        segs = base.split("/")
+        if len(segs) >= 5 and segs[3] == "issues" and "-X" in args and "POST" in args:
+            # gh api -X POST repos/owner/name/issues/<n>/comments -f body=...
+            number = int(segs[4])
+            body = next((a[len("body="):] for a in args if a.startswith("body=")), "")
+            state.setdefault("comments", []).append({"pr": number, "body": body, "repo": repo})
+            return
+        if base == f"repos/{owner}/{name}/pulls":
+            lines = []
+            for pr in state.get("open_prs", []):
+                if pr.get("repo") == repo:
+                    lines.append(f"{pr['number']}\t{pr['html_url']}\t{pr['head']}")
+            if lines:
+                sys.stdout.write("\n".join(lines) + "\n")
+            return
+        return
+    if cmd == "pr":
+        sub = args[1] if len(args) > 1 else ""
+        if sub == "list":
+            repo = flag_value(args, "--repo")
+            head = flag_value(args, "--head")
+            for pr in state.get("open_prs", []):
+                if pr.get("repo") == repo and pr.get("head") == head:
+                    sys.stdout.write(pr["html_url"] + "\n")
+                    return
+            sys.stdout.write("\n")
+            return
+        if sub == "create":
+            repo = flag_value(args, "--repo")
+            head = flag_value(args, "--head")
+            body = flag_value(args, "--body")
+            nums = [p["number"] for p in state.get("open_prs", [])] + \
+                   [c["number"] for c in state.get("closed", [])]
+            number = (max(nums) + 1) if nums else 1
+            url = f"https://github.com/{repo}/pull/{number}"
+            entry = {"number": number, "html_url": url, "head": head, "repo": repo}
+            state.setdefault("open_prs", []).append(entry)
+            state.setdefault("created", []).append({**entry, "body": body})
+            sys.stdout.write(url + "\n")
+            return
+        if sub == "comment":
+            number = int(args[2])
+            body = flag_value(args, "--body")
+            state.setdefault("comments", []).append({"pr": number, "body": body, "repo": flag_value(args, "--repo")})
+            return
+        if sub == "close":
+            number = int(args[2])
+            repo = flag_value(args, "--repo")
+            delete = "--delete-branch" in args
+            state["open_prs"] = [
+                p for p in state.get("open_prs", [])
+                if not (p["number"] == number and p.get("repo") == repo)
+            ]
+            state.setdefault("closed", []).append(
+                {"number": number, "repo": repo, "delete_branch": delete}
+            )
+            return
+    # Anything the script doesn't depend on is a silent no-op.
+
+
+def main():
+    state = load()
+    try:
+        run(state, sys.argv[1:])
+    finally:
+        save(state)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+FAKE_GIT = r'''#!/usr/bin/env bash
+# Offline fake `git`: `clone` copies a local fixture repo; push/fetch are
+# no-ops; everything else delegates to real git.
+case "$1" in
+  clone)
+    shift
+    dest="${@: -1}"
+    name="$(basename -- "$dest")"
+    cp -r -- "$FAKE_GH_FIXTURES/$name" "$dest"
+    echo "git clone $dest" >> "$GIT_LOG"
+    exit 0
+    ;;
+esac
+for arg in "$@"; do
+  case "$arg" in
+    push|fetch)
+      echo "git $arg" >> "$GIT_LOG"
+      exit 0
+      ;;
+  esac
+done
+echo "git $*" >> "$GIT_LOG"
+exec "$REAL_GIT_PATH" "$@"
+'''
+
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -31,6 +213,153 @@ def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedPr
         check=False,
         env=env,
     )
+
+
+class E2EHarness:
+    """Runs bump-consumers.sh against the fake gh/git in a temp directory."""
+
+    def __init__(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="bump-consumers-e2e-"))
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.fixtures = self.tmp / "fixtures"
+        self.fixtures.mkdir()
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        (self.bin / "gh").write_text(FAKE_GH, encoding="utf-8")
+        (self.bin / "gh").chmod(0o755)
+        (self.bin / "git").write_text(FAKE_GIT, encoding="utf-8")
+        (self.bin / "git").chmod(0o755)
+        self.state_path = self.tmp / "state.json"
+        self.state_path.write_text("{}", encoding="utf-8")
+        self.git_log = self.tmp / "git.log"
+        self.git_log.write_text("", encoding="utf-8")
+        self.env = {
+            "GH_TOKEN": "dummy-token",
+            "HOME": str(self.home),
+            "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "FAKE_GH_STATE": str(self.state_path),
+            "FAKE_GH_FIXTURES": str(self.fixtures),
+            "REAL_GIT_PATH": REAL_GIT,
+            "GIT_LOG": str(self.git_log),
+        }
+
+    def seed(self, name: str, workflows: dict[str, str], branch: str = "main") -> None:
+        """Create a local fixture repo with the given workflow files."""
+        repo = self.fixtures / name
+        (repo / ".github" / "workflows").mkdir(parents=True)
+        for filename, content in workflows.items():
+            (repo / ".github" / "workflows" / filename).write_text(content, encoding="utf-8")
+        git = [REAL_GIT, "-C", str(repo)]
+        subprocess.run(git + ["init", "-q"], check=True)
+        subprocess.run(git + ["config", "user.email", "t@t"], check=True)
+        subprocess.run(git + ["config", "user.name", "t"], check=True)
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "init"], check=True)
+        subprocess.run(git + ["branch", "-m", branch], check=True)
+
+    def write_state(self, repos: list[str], open_prs: list[dict]) -> None:
+        self.state_path.write_text(
+            json.dumps(
+                {"repos": repos, "open_prs": open_prs, "comments": [], "created": [], "closed": []},
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
+
+    def run_script(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["bash", str(SCRIPT), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=self.env,
+        )
+
+    def state(self) -> dict:
+        return json.loads(self.state_path.read_text(encoding="utf-8"))
+
+
+class SupersedeTests(unittest.TestCase):
+    """End-to-end: stale chore/flutter-builder-* PRs get superseded."""
+
+    WORKFLOWS_A = {
+        "ci.yml": "uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.0.0\n",
+        "other.yml": "uses: actions/checkout@v5\n",
+    }
+
+    def setUp(self) -> None:
+        self.harness = E2EHarness()
+        self.h = self.harness
+        self.h.seed("app-a", self.WORKFLOWS_A)
+        self.h.seed("app-b", {"ci.yml": "uses: actions/checkout@v5\n"})  # not connected
+        self.h.write_state(
+            ["app-a", "app-b"],
+            [
+                {"number": 7, "html_url": "https://github.com/testorg/app-a/pull/7",
+                 "head": "fix/unrelated", "repo": "testorg/app-a"},
+                {"number": 9, "html_url": "https://github.com/testorg/app-a/pull/9",
+                 "head": "chore/flutter-builder-v1.0.0", "repo": "testorg/app-a"},
+            ],
+        )
+
+    def test_supersedes_stale_prs_ignores_unrelated(self) -> None:
+        result = self.h.run_script("--ref", "v2.0.0", "--owner", OWNER, "--repos", "app-a,app-b")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.h.state()
+
+        # A new PR was opened for the connected project.
+        created = state["created"]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0]["head"], "chore/flutter-builder-v2.0.0")
+        self.assertEqual(created[0]["repo"], "testorg/app-a")
+        new_url = created[0]["html_url"]
+
+        # The stale chore/flutter-builder-* PR was commented and closed with
+        # --delete-branch; the unrelated PR and other repos were untouched.
+        self.assertEqual(
+            state["closed"],
+            [{"number": 9, "repo": "testorg/app-a", "delete_branch": True}],
+        )
+        self.assertEqual(len(state["comments"]), 1)
+        self.assertEqual(state["comments"][0]["pr"], 9)
+        self.assertIn(new_url, state["comments"][0]["body"])
+        open_heads = {pr["head"] for pr in state["open_prs"]}
+        self.assertIn("fix/unrelated", open_heads)
+        self.assertIn("chore/flutter-builder-v2.0.0", open_heads)
+        self.assertNotIn("chore/flutter-builder-v1.0.0", open_heads)
+        self.assertTrue(all(c["repo"] == "testorg/app-a" for c in created))
+
+        # ~/.gitconfig is never touched: HOME is fresh and has no git config.
+        self.assertFalse((self.h.home / ".gitconfig").exists())
+        self.assertIn("git push", self.h.git_log.read_text(encoding="utf-8"))
+
+    def test_refresh_path_skips_its_own_pr(self) -> None:
+        self.h.write_state(
+            ["app-a"],
+            [{"number": 3, "html_url": "https://github.com/testorg/app-a/pull/3",
+              "head": "chore/flutter-builder-v2.0.0", "repo": "testorg/app-a"}],
+        )
+        result = self.h.run_script("--ref", "v2.0.0", "--owner", OWNER, "--repos", "app-a")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.h.state()
+        # The existing PR on the same branch is refreshed, not duplicated or closed.
+        self.assertEqual(state["created"], [])
+        self.assertEqual(state["closed"], [])
+        self.assertEqual(state["comments"], [])
+        self.assertEqual({pr["number"] for pr in state["open_prs"]}, {3})
+
+    def test_dry_run_is_side_effect_free(self) -> None:
+        result = self.h.run_script("--ref", "v2.0.0", "--owner", OWNER,
+                                   "--repos", "app-a,app-b", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Dry run: 1 project(s) would get a PR", result.stdout)
+        state = self.h.state()
+        self.assertEqual(state["created"], [])
+        self.assertEqual(state["closed"], [])
+        self.assertEqual(state["comments"], [])
+        self.assertNotIn("push", self.h.git_log.read_text(encoding="utf-8"))
+        self.assertFalse((self.h.home / ".gitconfig").exists())
 
 
 class ScriptShapeTests(unittest.TestCase):
@@ -89,6 +418,19 @@ class ScriptShapeTests(unittest.TestCase):
             r'if \[ "\$dry_run" = true \]; then[\s\S]*?\n\s*continue',
             "the dry-run branch must not fall through into push/PR code",
         )
+
+    def test_it_isolates_git_auth_from_the_caller(self) -> None:
+        "GIT_CONFIG_GLOBAL inside $work, chmod 600, never ~/.gitconfig."
+        self.assertIn("GIT_CONFIG_GLOBAL", self.text)
+        self.assertIn("chmod 600", self.text)
+        self.assertNotRegex(self.text, r"git config --global[^\n]*\$HOME",
+                            "git auth must not write into $HOME/.gitconfig")
+
+    def test_it_supersedes_stale_pin_bump_prs(self) -> None:
+        self.assertIn("gh pr close", self.text)
+        self.assertIn("--delete-branch", self.text)
+        self.assertIn("BRANCH_PREFIX", self.text)
+        self.assertIn("warn", self.text)
 
 
 class WorkflowShapeTests(unittest.TestCase):
@@ -152,7 +494,7 @@ class InvocationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Unknown option", result.stderr)
 
-    def test_a_missing_token_stops_before_any_github_call(self) -> None:
+    def test_a_missing_token_stops_before_any_gh_call(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "gh-was-called"
             gh = Path(tmp) / "gh"

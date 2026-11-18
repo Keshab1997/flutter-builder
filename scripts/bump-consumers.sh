@@ -90,11 +90,19 @@ token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 [ -n "$token" ] || fail "Set GH_TOKEN to a token that can push and open pull requests in the connected projects."
 export GH_TOKEN="$token"
 
-# Authenticate clone/push without putting the token in a URL we might echo:
-# the rewrite lives only in this runner's global git config.
-git config --global url."https://x-access-token:${token}@github.com/".insteadOf "https://github.com/"
+work="$(mktemp -d)"
+trap 'rm -rf -- "$work"' EXIT
+
+# Isolate git auth from the caller: a private, mode-600 config inside $work,
+# removed with the trap. ~/.gitconfig is never mutated for auth and the token
+# does not survive the run on disk.
+GIT_CONFIG_GLOBAL="$work/git-config"
+touch "$GIT_CONFIG_GLOBAL"
+chmod 600 "$GIT_CONFIG_GLOBAL"
+export GIT_CONFIG_GLOBAL
 git config --global user.name "$COMMIT_NAME"
 git config --global user.email "$COMMIT_EMAIL"
+git config --global url."https://x-access-token:${token}@github.com/".insteadOf "https://github.com/"
 
 say "Owner: $owner"
 say "Target pin: @$ref"
@@ -143,9 +151,6 @@ EOF
 }
 
 # --- main loop ---------------------------------------------------------------
-
-work="$(mktemp -d)"
-trap 'rm -rf -- "$work"' EXIT
 
 moved=0
 skipped=0
@@ -233,6 +238,26 @@ while IFS= read -r name; do
     continue
   fi
   moved=$((moved + 1))
+
+  # Supersede earlier chore/flutter-builder-* PRs for this project so
+  # pin-bump PRs don't pile up across releases. Close each superseded PR with
+  # a comment linking the new PR and delete its head branch. Best-effort: a
+  # close failure warns but never fails the newly opened PR, and only
+  # chore/flutter-builder-* PRs are ever touched.
+  while IFS=$'\t' read -r number other_url head_ref; do
+    [ -n "$number" ] || continue
+    [ "$head_ref" = "$branch" ] && continue
+    [[ "$head_ref" == "$BRANCH_PREFIX"* ]] || continue
+    say "$name: superseding stale PR $head_ref ($other_url)"
+    if ! gh pr comment "$number" --repo "$owner/$name" --body \
+          "Superseded by $url — this pin-bump PR is stale; $url replaces it." 2>/dev/null; then
+      say "$name: warn (could not comment on $head_ref)"
+    fi
+    if ! gh pr close "$number" --repo "$owner/$name" --delete-branch 2>/dev/null; then
+      say "$name: warn (could not close/delete $head_ref)"
+    fi
+  done < <(gh api "repos/$owner/$name/pulls?state=open&per_page=100" \
+             --jq '.[] | [.number, .html_url, .head.ref] | @tsv' 2>/dev/null || true)
 done < <(list_repos)
 
 if [ "$dry_run" = true ]; then
