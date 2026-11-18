@@ -40,6 +40,9 @@ MAX_WAIT_MS=60000
 MIN_KB=5
 SELECTOR=""
 PORT=8080
+# hash = Flutter web's default (<base>/#<route>); path = usePathUrlStrategy
+# apps, which serve the route at <base><route>.
+URL_STRATEGY="hash"
 
 usage() {
   cat <<'HELP'
@@ -57,6 +60,9 @@ Capture screenshots of a built Flutter web app.
   --wait-for-selector S
                        also wait for a CSS selector (for example `flutter-view`)
   --port PORT          local port for the static server (default: 8080)
+  --url-strategy STR   hash (default): visit <base>/#<route> - Flutter web's
+                       default; path: visit <base><route> for apps that use
+                       usePathUrlStrategy
   -h, --help           this text
 
 Run `flutter build web --release` first; this script never invokes Flutter.
@@ -74,10 +80,40 @@ while [ "$#" -gt 0 ]; do
     --min-kb)    MIN_KB="${2:?--min-kb needs a value}"; shift 2 ;;
     --wait-for-selector) SELECTOR="${2:?--wait-for-selector needs a value}"; shift 2 ;;
     --port)      PORT="${2:?--port needs a value}"; shift 2 ;;
+    --url-strategy) URL_STRATEGY="${2:?--url-strategy needs a value}"; shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) printf 'capture-screenshots: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# Validate up front: a bad number must fail in a second, not after the server
+# has started and chromium has been downloaded.
+if ! [[ "$WAIT_MS" =~ ^[0-9]+$ ]]; then
+  printf 'capture-screenshots: --wait-ms must be a non-negative integer (got: %s)\n' "$WAIT_MS" >&2
+  exit 2
+fi
+if ! [[ "$MAX_WAIT_MS" =~ ^[0-9]+$ ]]; then
+  printf 'capture-screenshots: --max-wait-ms must be a non-negative integer (got: %s)\n' "$MAX_WAIT_MS" >&2
+  exit 2
+fi
+if ! [[ "$MIN_KB" =~ ^[0-9]+$ ]]; then
+  printf 'capture-screenshots: --min-kb must be a non-negative integer (got: %s)\n' "$MIN_KB" >&2
+  exit 2
+fi
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+  printf 'capture-screenshots: --port must be an integer (got: %s)\n' "$PORT" >&2
+  exit 2
+fi
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  printf 'capture-screenshots: --port must be 1-65535 (got: %s)\n' "$PORT" >&2
+  exit 2
+fi
+case "$URL_STRATEGY" in
+  hash|path) ;;
+  *)
+    printf 'capture-screenshots: --url-strategy must be hash or path (got: %s)\n' "$URL_STRATEGY" >&2
+    exit 2 ;;
+esac
 
 [ -f "$BUILD_DIR/index.html" ] || {
   printf 'capture-screenshots: %s/index.html not found - run `flutter build web --release` first.\n' "$BUILD_DIR" >&2
@@ -161,6 +197,7 @@ NODE_PATH="$workdir/node_modules" node "$SCRIPT_DIR/capture-pages.cjs" \
   --wait-ms "$WAIT_MS" \
   --max-wait-ms "$MAX_WAIT_MS" \
   --min-bytes "$((MIN_KB * 1024))" \
+  --url-strategy "$URL_STRATEGY" \
   ${SELECTOR:+--selector "$SELECTOR"}
 
 printf '\n%-40s %-16s %-10s %s\n' "file" "route" "viewport" "size"
