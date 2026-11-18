@@ -31,12 +31,22 @@ printf '|---|---|---|---|---|\n'
 # whatever is left, so name/route/viewport/size stay correct either way.
 while IFS=$'\t' read -r name route viewport size colours _share; do
   [ -n "$name" ] || continue
-  if [ -n "${colours:-}" ] && [ "$colours" -ge 0 ] 2>/dev/null; then
-    printf '| `%s.png` | `%s` | %s | %s KB | %s |\n' \
-      "$name" "$route" "$viewport" "$((size / 1024))" "$colours"
+  # A pipe in a route (or name) would open a phantom column in the table.
+  name_cell="${name//|/\\|}"
+  route_cell="${route//|/\\|}"
+  # A non-numeric size (a hand-edited or foreign manifest) must not take the
+  # step down under bash arithmetic; print it verbatim instead.
+  if [[ "$size" =~ ^[0-9]+$ ]]; then
+    size_cell="$((size / 1024)) KB"
   else
-    printf '| `%s.png` | `%s` | %s | %s KB | |\n' \
-      "$name" "$route" "$viewport" "$((size / 1024))"
+    size_cell="$size"
+  fi
+  if [ -n "${colours:-}" ] && [ "$colours" -ge 0 ] 2>/dev/null; then
+    printf '| `%s.png` | `%s` | %s | %s | %s |\n' \
+      "$name_cell" "$route_cell" "$viewport" "$size_cell" "$colours"
+  else
+    printf '| `%s.png` | `%s` | %s | %s | |\n' \
+      "$name_cell" "$route_cell" "$viewport" "$size_cell"
   fi
 done < "$manifest"
 printf '\n'
