@@ -19,14 +19,24 @@
 # Usage:
 #   bash scripts/preview-hub.sh --branch-dir preview/my-branch
 #   bash scripts/preview-hub.sh --preview-dir preview --label my-branch
+#   bash scripts/preview-hub.sh --preview-dir preview --remove my-branch
+#   bash scripts/preview-hub.sh --preview-dir preview --refresh
+#
+# --remove and --refresh are for deleted-branch cleanup: they rebuild the page
+# from the live directory listing (dropping the named directory even if the
+# Contents API has not caught up with the deletion) and never insert a deploy
+# label. With zero previews left they still write the page, saying so.
 #
 # Env: GITHUB_TOKEN (contents: write), GITHUB_REPOSITORY, PAGES_BRANCH
-#      (default gh-pages), GITHUB_STEP_SUMMARY (optional).
+#      (default gh-pages), GITHUB_API_URL (default https://api.github.com),
+#      GITHUB_STEP_SUMMARY (optional).
 set -euo pipefail
 
 BRANCH_DIR="preview"
 LABEL=""
 PREVIEW_DIR=""
+MODE="deploy"
+REMOVE_NAME=""
 
 usage() {
   cat <<'HELP'
@@ -36,9 +46,15 @@ Keep the preview index page up to date.
                       (the preview directory is its parent, the label its name)
   --preview-dir DIR   override the directory holding the per-branch previews
   --label NAME        override the branch label shown at the top
+  --remove NAME       deleted-branch cleanup: drop NAME from the listing even
+                      if the Contents API still shows it; no label is inserted
+  --refresh           rebuild the page from the live directory listing
+                      without inserting a label
   -h, --help          this text
 
-Env: GITHUB_TOKEN, GITHUB_REPOSITORY, PAGES_BRANCH (default gh-pages).
+The directory arguments must not contain empty, "." or ".." segments.
+Env: GITHUB_TOKEN, GITHUB_REPOSITORY, PAGES_BRANCH (default gh-pages),
+GITHUB_API_URL (default https://api.github.com).
 HELP
 }
 
@@ -47,6 +63,8 @@ while [ "$#" -gt 0 ]; do
     --branch-dir)  BRANCH_DIR="${2:?--branch-dir needs a value}"; shift 2 ;;
     --preview-dir) PREVIEW_DIR="${2:?--preview-dir needs a value}"; shift 2 ;;
     --label)       LABEL="${2:?--label needs a value}"; shift 2 ;;
+    --remove)      MODE="remove"; REMOVE_NAME="${2:?--remove needs a value}"; shift 2 ;;
+    --refresh)     MODE="refresh"; shift ;;
     -h|--help)     usage; exit 0 ;;
     *) printf 'preview-hub: unknown option: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -59,15 +77,38 @@ if [ -z "$PREVIEW_DIR" ]; then
     *)   PREVIEW_DIR="$BRANCH_DIR" ;;
   esac
 fi
-[ -n "$LABEL" ] || LABEL="${BRANCH_DIR##*/}"
+# Only a deploy names the page; cleanup modes render the live listing as-is.
+if [ "$MODE" = deploy ]; then
+  [ -n "$LABEL" ] || LABEL="${BRANCH_DIR##*/}"
+fi
 PREVIEW_DIR="${PREVIEW_DIR#/}"; PREVIEW_DIR="${PREVIEW_DIR%/}"
 [ -n "$PREVIEW_DIR" ] || { printf 'preview-hub: the preview directory is empty.\n' >&2; exit 2; }
+
+# A "." or ".." (or empty) segment would let the write land outside the
+# preview directory - or at the repository root - so reject it up front.
+reject_bad_segments() { # reject_bad_segments OPTION VALUE
+  local option="$1" rest="$2" seg
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      */*) seg="${rest%%/*}"; rest="${rest#*/}" ;;
+      *)   seg="$rest"; rest="" ;;
+    esac
+    case "$seg" in
+      ""|"."|"..")
+        printf 'preview-hub: %s must not contain empty, "." or ".." segments (got: %s)\n' \
+          "$option" "$2" >&2
+        exit 2 ;;
+    esac
+  done
+}
+reject_bad_segments --branch-dir "$BRANCH_DIR"
+reject_bad_segments --preview-dir "$PREVIEW_DIR"
 
 : "${GITHUB_TOKEN:?preview-hub: GITHUB_TOKEN is required}"
 : "${GITHUB_REPOSITORY:?preview-hub: GITHUB_REPOSITORY is required}"
 command -v python3 >/dev/null 2>&1 || { printf 'preview-hub: python3 is required.\n' >&2; exit 2; }
 
-python3 - "$PREVIEW_DIR" "$LABEL" <<'PY'
+python3 - "$PREVIEW_DIR" "$LABEL" "$MODE" "$REMOVE_NAME" <<'PY'
 import base64
 import html
 import json
@@ -78,12 +119,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-preview_dir, label = sys.argv[1], sys.argv[2]
+preview_dir, label, mode, remove_name = sys.argv[1:5]
 repo = os.environ["GITHUB_REPOSITORY"]
 owner, _, name = repo.partition("/")
 pages_branch = os.environ.get("PAGES_BRANCH", "gh-pages")
 token = os.environ["GITHUB_TOKEN"]
-api = f"https://api.github.com/repos/{repo}"
+# Overridable for offline tests; production keeps the default.
+api = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repo}"
+# The branch is a query value, not a path: encode it (e.g. "releases/1.0").
+ref_qs = urllib.parse.quote(pages_branch, safe="")
 headers = {
     "Authorization": f"Bearer {token}",
     "Accept": "application/vnd.github+json",
@@ -107,7 +151,7 @@ def call(method: str, path: str, payload: dict | None = None):
 
 def listing() -> tuple[int, list]:
     status, data = call(
-        "GET", f"/contents/{urllib.parse.quote(preview_dir)}?ref={pages_branch}")
+        "GET", f"/contents/{urllib.parse.quote(preview_dir)}?ref={ref_qs}")
     if status == 200 and isinstance(data, list):
         return status, data
     return status, []
@@ -115,16 +159,29 @@ def listing() -> tuple[int, list]:
 
 status, items = listing()
 branches = sorted({item["name"] for item in items if item.get("type") == "dir"})
-if label not in branches:
+has_label = mode == "deploy" and bool(label)
+if mode == "remove":
+    # The deletion is authoritative even if the API is briefly stale and still
+    # lists the directory.
+    branches = [b for b in branches if b != remove_name]
+elif mode == "deploy":
     # The deploy that triggered this ran moments ago; if the API has not caught
     # up yet, the branch still belongs in its own index.
-    branches.insert(0, label)
+    if label not in branches:
+        branches.insert(0, label)
 print(f"preview-hub: {len(branches)} branch preview(s): {', '.join(branches)}")
 
 hub_url = f"https://{owner.lower()}.github.io/{name}/{preview_dir}/"
-rows = "\n".join(
-    f'      <li><a href="./{urllib.parse.quote(b)}/">{html.escape(b)}</a></li>'
-    for b in branches)
+if branches:
+    rows = "\n".join(
+        f'      <li><a href="./{urllib.parse.quote(b)}/">{html.escape(b)}</a></li>'
+        for b in branches)
+else:
+    rows = '      <li style="color:#94a3b8">No active branch previews.</li>'
+if has_label:
+    latest = f'Latest: <strong>{html.escape(label)}</strong>.\n'
+else:
+    latest = ""
 page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -138,8 +195,7 @@ page = f"""<!DOCTYPE html>
     <h1 style="margin:0 0 .25rem;font-size:1.5rem">{html.escape(name)} - web previews</h1>
     <p style="margin:0 0 1.5rem;color:#94a3b8">
       One build per branch, updated whenever that branch is pushed.
-      Latest: <strong>{html.escape(label)}</strong>.
-    </p>
+      {latest}    </p>
     <ul style="list-style:none;padding:0;margin:0;display:grid;gap:.5rem">
 {rows}
     </ul>
@@ -154,10 +210,15 @@ page = f"""<!DOCTYPE html>
 
 path = f"/contents/{urllib.parse.quote(f'{preview_dir}/index.html')}"
 content = base64.b64encode(page.encode()).decode()
-message = f"preview hub: {len(branches)} branch(es) ({label})"
+if mode == "remove":
+    message = f"preview hub: removed {remove_name}, {len(branches)} branch(es) left"
+elif mode == "refresh":
+    message = f"preview hub: refreshed, {len(branches)} branch(es)"
+else:
+    message = f"preview hub: {len(branches)} branch(es) ({label})"
 
 for attempt in range(1, 6):
-    status, existing = call("GET", f"{path}?ref={pages_branch}")
+    status, existing = call("GET", f"{path}?ref={ref_qs}")
     sha = existing.get("sha") if status == 200 and isinstance(existing, dict) else None
     payload = {"message": message, "content": content, "branch": pages_branch}
     if sha:
