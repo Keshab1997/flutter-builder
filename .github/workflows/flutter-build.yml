@@ -529,6 +529,8 @@ jobs:
             refs/tags/v*) ref="${GITHUB_REF#refs/tags/}" ;;
           esac
           url="https://raw.githubusercontent.com/Keshab1997/flutter-builder/${ref}/scripts/check_toolchain.py"
+          echo "::group::toolchain checker ($ref)"
+          echo "Fetching $url"
           if ! curl -fsSL "$url" -o "$checker"; then
             echo "::notice::toolchain check skipped: could not fetch $url"
             exit 0
@@ -548,6 +550,7 @@ jobs:
           else
             python3 "$checker" --root . || exit 1
           fi
+          echo "::endgroup::"
 
       - name: Install dependencies
         run: flutter pub get
@@ -953,7 +956,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.18.4
+          ref: v1.18.5
           path: .flutter-builder
 
       - name: Pre-flight doctor

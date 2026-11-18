@@ -290,6 +290,12 @@ class WorkflowWiring(unittest.TestCase):
             "the checker must be fetched from the pinned tag, not main")
         self.assertIn("refs/tags/", workflow)
 
+    def test_the_url_used_is_echoed(self):
+        # The runner resolves the variable; the log must show which tag was
+        # actually fetched, or a consumer cannot tell what ran.
+        workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
+        self.assertIn('echo "Fetching $url"', workflow)
+
     def test_step_ships_the_strict_switch(self):
         workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
         self.assertIn("REQUIRE_TOOLCHAIN_TABLE", workflow)
