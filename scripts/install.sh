@@ -3,7 +3,7 @@
 # This file is self-contained so it also works when streamed through curl | bash.
 set -euo pipefail
 
-DEFAULT_REF=v1.18.1
+DEFAULT_REF=v1.18.2
 REUSABLE=Keshab1997/flutter-builder/.github/workflows
 FILES=(ci.yml manual-build.yml publish-release.yml web-preview.yml)
 
@@ -15,12 +15,12 @@ usage() {
 Install GitHub Actions callers for a Flutter project (no Flutter SDK needed).
 
 Run from your project directory (or any directory inside its Git repository):
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.1/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.2/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
   --app-dir DIR           Flutter app directory, relative to the Git repository root
   --app-name NAME         Display name for GitHub Releases (default: the app's android:label, else the pubspec name)
-  --ref REF               Pin the reusable workflows to a tag/SHA (default: v1.18.1)
+  --ref REF               Pin the reusable workflows to a tag/SHA (default: v1.18.2)
   --with-screenshots      Also install ui-screenshots.yml (manual UI screenshot caller)
   --with-widget-tests     Also install widget-tests.yml (manual widget-test diagnostics caller)
   --dry-run               Show changes without writing files

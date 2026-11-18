@@ -118,6 +118,8 @@ def agp_version(root: pathlib.Path) -> str | None:
 
 def kotlin_version(root: pathlib.Path) -> str | None:
     text = read_text(root / "android/settings.gradle.kts")
+    if not text:
+        text = read_text(root / "android/settings.gradle")
     match = re.search(
         r'org\.jetbrains\.kotlin\.android"?\)?\s*version\s*"?([\d.]+)"?', text)
     return match.group(1) if match else None
@@ -179,11 +181,23 @@ def check(root: pathlib.Path) -> dict:
     problems: list[str] = []
     notes: list[str] = []
 
+    # A pin the project does not keep is not a mismatch. Most repos here never
+    # commit .fvmrc and let the workflow's flutter-channel decide, and the
+    # builder can generate android/ on the fly — failing those would break
+    # every consumer for a file it chooses not to have.
+    pinned = (root / ".fvmrc").exists() or (root / ".fvm").is_dir()
     if flutter is None:
-        problems.append('no Flutter version: no "flutter" key in .fvmrc and no '
-                        "flutter on PATH")
-    if agp is None:
-        problems.append("cannot read AGP from android/settings.gradle.kts")
+        message = ('no Flutter version: no "flutter" key in .fvmrc and no '
+                   "flutter on PATH")
+        # Nothing to compare against when the project keeps no pin at all: the
+        # workflow still works, so say so and move on instead of failing.
+        (problems if pinned else notes).append(
+            message if pinned else "no Flutter pin in this project, so the "
+            "Android floors were not checked")
+    has_android_settings = ((root / "android/settings.gradle.kts").exists()
+                            or (root / "android/settings.gradle").exists())
+    if agp is None and has_android_settings:
+        problems.append("cannot read AGP from android/settings.gradle(.kts)")
     if gradle is None:
         problems.append("cannot read Gradle from the wrapper properties")
     if flutter and floor is None:

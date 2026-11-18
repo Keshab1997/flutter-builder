@@ -139,6 +139,72 @@ class ToolchainCheck(unittest.TestCase):
         self.assertEqual(result["constraints"]["agp_min"], "9.1.1")
 
 
+class ConsumerShapes(unittest.TestCase):
+    """Repos that pin this builder come in two shapes, and neither may fail.
+
+    Most keep no .fvmrc at all (the workflow's flutter-channel decides), and
+    several still use the Groovy settings.gradle Flutter generated for them.
+    v1.18.0 turned both into a red build the moment the step was wired in.
+    """
+
+    GROOVY = """plugins {
+    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    id "com.android.application" version "%s" apply false
+    id "org.jetbrains.kotlin.android" version "%s" apply false
+}
+"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.root = pathlib.Path(self.dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write(self, settings_name, settings_text, pin=None):
+        (self.root / "android/gradle/wrapper").mkdir(parents=True, exist_ok=True)
+        (self.root / "android" / settings_name).write_text(settings_text)
+        (self.root / "android/gradle/wrapper/gradle-wrapper.properties").write_text(
+            WRAPPER % "9.5.0")
+        if pin is not None:
+            (self.root / ".fvmrc").write_text(json.dumps({"flutter": pin}))
+
+    def run_check(self):
+        env = dict(os.environ)
+        env.pop("FLUTTER_ROOT", None)
+        out = subprocess.run([sys.executable, str(CHECKER), "--root", str(self.root),
+                              "--json"], capture_output=True, text=True, env=env)
+        return out.returncode, json.loads(out.stdout)
+
+    def test_groovy_settings_without_a_pin_passes(self):
+        self.write("settings.gradle", self.GROOVY % ("9.1.0", "2.4.0"))
+        code, result = self.run_check()
+        self.assertEqual(code, 0, result["problems"])
+
+    def test_kotlin_is_read_from_the_groovy_settings(self):
+        self.write("settings.gradle", self.GROOVY % ("8.13.0", "2.2.20"))
+        _, result = self.run_check()
+        self.assertEqual(result["kotlin"], "2.2.20")
+
+    def test_missing_pin_is_a_note_not_a_failure(self):
+        self.write("settings.gradle.kts", SETTINGS % ("9.3.1", "2.4.20"))
+        code, result = self.run_check()
+        self.assertEqual(code, 0, result["problems"])
+        self.assertTrue(result["notes"], "a silent skip would hide why it passed")
+
+    def test_pinned_but_unreadable_still_fails(self):
+        self.write("settings.gradle.kts", SETTINGS % ("9.3.1", "2.4.20"))
+        (self.root / ".fvm").mkdir()  # a pin exists, its version does not
+        code, result = self.run_check()
+        self.assertEqual(code, 1)
+
+    def test_pinned_mismatch_still_fails(self):
+        self.write("settings.gradle", self.GROOVY % ("9.1.0", "2.4.0"), pin="3.50.0")
+        code, result = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("below Flutter 3.50.0", result["problems"][0])
+
+
 class WorkflowWiring(unittest.TestCase):
     """The checker is fetched into RUNNER_TEMP, so the step must point it at the
     project — the first release of this check failed its own consumers because

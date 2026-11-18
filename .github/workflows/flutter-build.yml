@@ -512,6 +512,10 @@ jobs:
             echo "::notice::toolchain check skipped: could not fetch $url"
             exit 0
           fi
+          if [ ! -d android ]; then
+            echo "::notice::toolchain check skipped: no android/ in this checkout"
+            exit 0
+          fi
           # --root . : the checker is fetched into RUNNER_TEMP, so without it
           # the script would inspect its own directory instead of the project.
           # working-directory above is the caller's app directory.
@@ -921,7 +925,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.18.1
+          ref: v1.18.2
           path: .flutter-builder
 
       - name: Pre-flight doctor
