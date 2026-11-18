@@ -339,7 +339,7 @@ elif [ -d "$WF_DIR" ]; then
     v="$(grep -oE 'flutter-builder/\.github/workflows/[a-zA-Z0-9._-]*\.ya?ml@v[0-9][0-9.]*' "$f" \
          | grep -oE 'v[0-9][0-9.]*$' | tr -d 'v' | sort -V | head -1 || true)"
     [ -n "$v" ] || continue
-    ver_ge "$MIN_VER" "$v" || OLD="$OLD"$NL"  $f pins @$v"
+    ver_ge "$MIN_VER" "$v" || OLD="$OLD${NL}  $f pins @$v"
   done <<< "$WFS"
   [ -z "$OLD" ] && pass "flutter-builder pinned to >= v$MIN_VER" \
                 || fail "  OUTDATED builder (< v$MIN_VER) — google-services.json injection will not work:$OLD"
@@ -360,10 +360,10 @@ elif [ -d "$WF_DIR" ]; then
         if (inw && $0 ~ /\$\{\{[[:space:]]*secrets\./) print FILENAME " line " FNR
       }
     ' "$f" 2>/dev/null || true)"
-    [ -n "$bad" ] && BAD="$BAD"$NL"$bad"
+    [ -n "$bad" ] && BAD="$BAD$NL$bad"
   done <<< "$WFS"
   [ -z "$BAD" ] && pass "no \${{ secrets.* }} inside with: blocks" \
-                || fail "  \${{ secrets.* }} USED INSIDE with: — the run dies with zero jobs and no error:"$NL"$BAD"$NL"     use \${{ vars.* }} for dart-defines / build-env instead"
+                || fail "  \${{ secrets.* }} USED INSIDE with: — the run dies with zero jobs and no error:${NL}$BAD${NL}     use \${{ vars.* }} for dart-defines / build-env instead"
 
   # Is the Firebase secret actually forwarded? Only workflows that produce a
   # build artifact need it — a CI job that only runs analyze/test should NOT
@@ -383,7 +383,7 @@ elif [ -d "$WF_DIR" ]; then
     if grep -q 'secrets:[[:space:]]*inherit' "$f" || grep -q 'GOOGLE_SERVICES_JSON_BASE64' "$f"; then
       :
     else
-      FWD="$FWD"$NL"  $f builds an artifact but does not forward GOOGLE_SERVICES_JSON_BASE64"
+      FWD="$FWD${NL}  $f builds an artifact but does not forward GOOGLE_SERVICES_JSON_BASE64"
     fi
   done <<< "$WFS"
   [ -z "$FWD" ] && pass "GOOGLE_SERVICES_JSON_BASE64 forwarded by every build workflow" \
@@ -406,7 +406,7 @@ LIB="${LIB:-lib}"
 if [ -d "$LIB" ]; then
   HITS="$(grep -rlE 'ca-app-pub-3940256099942544' "$LIB" 2>/dev/null || true)"
   [ -z "$HITS" ] && pass "no Google test ad IDs under $LIB/" \
-                 || fail "  GOOGLE TEST AD ID IN SOURCE — release gate will fail:"$NL"$HITS"
+                 || fail "  GOOGLE TEST AD ID IN SOURCE — release gate will fail:${NL}$HITS"
 else
   info "no lib/ directory to scan"
 fi
@@ -423,12 +423,12 @@ PROD="$(grep -rnE 'ca-app-pub-[0-9]{8,}~[0-9]+' --include='*.dart' --include='*.
         | grep -v 'ca-app-pub-3940256099942544' \
         | cut -d: -f1 | sort -u || true)"
 [ -z "$PROD" ] && pass "no production AdMob app ID hardcoded in source" \
-               || warn "  production AdMob app ID hardcoded — move it to a secret/variable:"$NL"$PROD"
+               || warn "  production AdMob app ID hardcoded — move it to a secret/variable:${NL}$PROD"
 
 EX="$(grep -rlE 'com\.example\.' --include='*.dart' --include='*.kts' \
       --include='*.xml' --include='*.gradle' "$SCAN_DIR" 2>/dev/null | grep -v '/\.git/' || true)"
 [ -z "$EX" ] && pass "no com.example placeholders" \
-             || warn "  com.example placeholders present:"$NL"$EX"
+             || warn "  com.example placeholders present:${NL}$EX"
 
 if [ -n "$APP_DIR" ]; then
   TRACKED="$(git ls-files -- "$APP_DIR" | grep -E '(google-services\.json|GoogleService-Info\.plist|key\.properties|\.jks$|\.keystore$)' || true)"
@@ -436,7 +436,7 @@ else
   TRACKED="$(git ls-files | grep -E '(google-services\.json|GoogleService-Info\.plist|key\.properties|\.jks$|\.keystore$)' || true)"
 fi
 [ -z "$TRACKED" ] && pass "no secrets/config tracked by git" \
-                  || fail "  SECRET FILES STILL TRACKED BY GIT:"$NL"$TRACKED"
+                  || fail "  SECRET FILES STILL TRACKED BY GIT:${NL}$TRACKED"
 
 # --------------------------------------------------------------------------- #
 # summary
