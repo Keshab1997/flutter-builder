@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
+from unittest import mock
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +135,42 @@ class RunSummaryTests(unittest.TestCase):
             timing.median_job_seconds(records),
             {"cleanup": 40, "preview": 140},
         )
+
+
+class TokenTests(unittest.TestCase):
+    def test_the_bootstrap_save_is_the_last_resort(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("from-bootstrap\n")
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": "",
+                                              "HOME": tmp}), \
+                    mock.patch.object(timing.shutil, "which", return_value=None):
+                self.assertEqual(timing.resolve_token(None), "from-bootstrap")
+
+    def test_an_empty_bootstrap_save_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("  \n")
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": "",
+                                              "HOME": tmp}), \
+                    mock.patch.object(timing.shutil, "which", return_value=None):
+                self.assertIsNone(timing.resolve_token(None))
+
+    def test_a_failing_gh_cli_falls_back_to_the_bootstrap_save(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("from-bootstrap\n")
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": "",
+                                              "HOME": tmp}), \
+                    mock.patch.object(timing.shutil, "which",
+                                      return_value="/usr/bin/gh"), \
+                    mock.patch.object(timing.subprocess, "run",
+                                      side_effect=subprocess.CalledProcessError(
+                                          1, ["gh", "auth", "token"])):
+                self.assertEqual(timing.resolve_token(None), "from-bootstrap")
 
 
 class ApiSafetyTests(unittest.TestCase):

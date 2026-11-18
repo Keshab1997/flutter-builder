@@ -86,6 +86,19 @@ def resolve_repo(value: Optional[str]) -> str:
     return repo
 
 
+def _bootstrap_token() -> Optional[str]:
+    """The token saved by agent-bootstrap, when it left one behind."""
+    try:
+        path = Path.home() / "agent-bootstrap" / "secrets" / "gh_token.txt"
+        if path.is_file():
+            token = path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return None
+
+
 def resolve_token(token_file: Optional[str]) -> Optional[str]:
     if token_file:
         try:
@@ -110,10 +123,12 @@ def resolve_token(token_file: Optional[str]) -> Optional[str]:
                 text=True,
             )
         except (OSError, subprocess.CalledProcessError):
-            return None
-        token = result.stdout.strip()
-        return token or None
-    return None
+            result = None
+        if result is not None:
+            token = result.stdout.strip()
+            if token:
+                return token
+    return _bootstrap_token()
 
 
 def api_get(path: str, token: Optional[str] = None) -> Dict[str, Any]:

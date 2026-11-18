@@ -12,11 +12,13 @@ No third-party modules.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 LOOP = ROOT / "agent-pack" / "agent_loop.py"
@@ -178,6 +180,34 @@ class AgentLoopTests(unittest.TestCase):
                 self.git("remote", "add", "origin", url)
                 self.assertEqual(module.github_repo(self.repo), expected)
                 self.git("remote", "remove", "origin")
+
+    def test_resolve_token_falls_back_to_the_bootstrap_save(self) -> None:
+        spec = importlib.util.spec_from_file_location("agent_loop_under_test",
+                                                      str(LOOP))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("from-bootstrap\n")
+            env = dict(os.environ, GITHUB_TOKEN="", GH_TOKEN="", HOME=tmp)
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(module.resolve_token(None), "from-bootstrap")
+
+    def test_resolve_token_ignores_an_empty_bootstrap_save(self) -> None:
+        spec = importlib.util.spec_from_file_location("agent_loop_under_test",
+                                                      str(LOOP))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            secrets = Path(tmp) / "agent-bootstrap" / "secrets"
+            secrets.mkdir(parents=True)
+            (secrets / "gh_token.txt").write_text("\n")
+            env = dict(os.environ, GITHUB_TOKEN="", GH_TOKEN="", HOME=tmp)
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(module.shutil, "which",
+                                      return_value=None):
+                self.assertIsNone(module.resolve_token(None))
 
     def test_preflight_findings_stop_the_loop_before_the_commit(self) -> None:
         self.branch("feat/print")

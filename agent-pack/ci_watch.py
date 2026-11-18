@@ -39,6 +39,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 API = "https://api.github.com"
 TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z\s?")
@@ -87,6 +88,19 @@ def git(*args: str) -> str | None:
         return None
 
 
+def _bootstrap_token() -> str | None:
+    """The token saved by agent-bootstrap, when it left one behind."""
+    try:
+        path = Path.home() / "agent-bootstrap" / "secrets" / "gh_token.txt"
+        if path.is_file():
+            token = path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return None
+
+
 def resolve_token(arg: str | None) -> str:
     if arg:
         try:
@@ -108,6 +122,9 @@ def resolve_token(arg: str | None) -> str:
             token = ""
         if token:
             return token
+    bootstrap = _bootstrap_token()
+    if bootstrap:
+        return bootstrap
     die("no token: pass --token-file PATH, set $GITHUB_TOKEN, or run `gh auth login`")
 
 
