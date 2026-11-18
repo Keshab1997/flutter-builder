@@ -79,6 +79,13 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("app-name:", before["publish-release.yml"])
         self.assertIn(f"publish-release.yml@{PIN}", before["publish-release.yml"])
         self.assertFalse((self.repo / ".github/workflows/release.yml").exists())
+        # The optional callers are NOT part of the default install.
+        self.assertFalse(
+            (self.repo / ".github/workflows/ui-screenshots.yml").exists()
+        )
+        self.assertFalse(
+            (self.repo / ".github/workflows/widget-tests.yml").exists()
+        )
         self.assertIn(f"web-preview.yml@{PIN}", before["web-preview.yml"])
         self.assertIn("secrets: inherit", before["web-preview.yml"])
         self.assertIn("group: web-preview\n", before["web-preview.yml"])
@@ -314,7 +321,105 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer("--help", piped=True)
         self.assert_success(result)
         self.assertIn("--app-dir", result.stdout)
+        self.assertIn("--with-screenshots", result.stdout)
+        self.assertIn("--with-widget-tests", result.stdout)
         self.assertFalse((self.repo / ".github").exists())
+
+    def test_with_screenshots_installs_the_screenshot_caller(self) -> None:
+        self.flutter_app()
+        result = self.run_installer("--with-screenshots")
+        self.assert_success(result)
+        for name in FILES:
+            self.assertTrue((self.repo / ".github/workflows" / name).is_file())
+        caller = self.installed("ui-screenshots.yml")
+        self.assertIn(f"ui-screenshots.yml@{PIN}", caller)
+        self.assertIn('working-directory: "."', caller)
+        self.assertIn("secrets: inherit", caller)
+        self.assertIn("routes: ${{ inputs.routes || '/' }}", caller)
+        self.assertIn(
+            "wait-ms: ${{ fromJSON(inputs['wait-ms'] || '8000') }}", caller
+        )
+        self.assertIn("group: ui-screenshots-${{ github.ref }}", caller)
+        # The widget-test caller was not requested.
+        self.assertFalse(
+            (self.repo / ".github/workflows/widget-tests.yml").exists()
+        )
+
+    def test_with_widget_tests_installs_the_widget_test_caller(self) -> None:
+        self.flutter_app("apps/mobile")
+        result = self.run_installer(
+            "--app-dir", "apps/mobile", "--with-widget-tests"
+        )
+        self.assert_success(result)
+        caller = self.installed("widget-tests.yml")
+        self.assertIn(f"flutter-widget-tests.yml@{PIN}", caller)
+        self.assertIn('working-directory: "apps/mobile"', caller)
+        self.assertIn(
+            "test-target: ${{ inputs['test-target'] || 'test' }}", caller
+        )
+        self.assertIn(
+            "test-concurrency: ${{ inputs['test-concurrency'] || 0 }}", caller
+        )
+        self.assertIn("group: widget-tests-${{ github.ref }}", caller)
+        self.assertFalse(
+            (self.repo / ".github/workflows/ui-screenshots.yml").exists()
+        )
+
+    def test_with_both_flags_and_rerun_is_idempotent(self) -> None:
+        self.flutter_app()
+        args = ("--with-screenshots", "--with-widget-tests")
+        self.assert_success(self.run_installer(*args))
+        names = FILES + ("ui-screenshots.yml", "widget-tests.yml")
+        before = {name: self.installed(name) for name in names}
+        second = self.run_installer(*args)
+        self.assert_success(second)
+        self.assertIn("nothing changed", second.stdout)
+        self.assertEqual(before, {name: self.installed(name) for name in names})
+        self.assertFalse((self.repo / ".github/flutter-builder-backups").exists())
+
+    def test_with_screenshots_dry_run_creates_nothing(self) -> None:
+        self.flutter_app()
+        result = self.run_installer("--with-screenshots", "--dry-run")
+        self.assert_success(result)
+        self.assertIn("Will add: .github/workflows/ui-screenshots.yml", result.stdout)
+        self.assertIn("no files were changed", result.stdout)
+        self.assertFalse((self.repo / ".github").exists())
+
+    def test_with_widget_tests_conflict_without_force_aborts(self) -> None:
+        self.flutter_app()
+        target = self.repo / ".github/workflows/widget-tests.yml"
+        target.parent.mkdir(parents=True)
+        target.write_text("keep mine\n", encoding="utf-8")
+        result = self.run_installer("--with-widget-tests")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CONFLICT", result.stdout)
+        self.assertIn("nothing was changed", result.stderr)
+        self.assertEqual(target.read_text(), "keep mine\n")
+        # The abort is all-or-nothing: the standard callers are not written.
+        for name in FILES:
+            self.assertFalse((target.parent / name).exists())
+
+    def test_with_screenshots_force_backs_up_before_replacing(self) -> None:
+        self.flutter_app()
+        target = self.repo / ".github/workflows/ui-screenshots.yml"
+        target.parent.mkdir(parents=True)
+        target.write_text("custom screenshots caller\n", encoding="utf-8")
+        result = self.run_installer("--with-screenshots", "--force")
+        self.assert_success(result)
+        self.assertIn(f"ui-screenshots.yml@{PIN}", self.installed("ui-screenshots.yml"))
+        backups = list(
+            (self.repo / ".github/flutter-builder-backups").glob("*/ui-screenshots.yml")
+        )
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), "custom screenshots caller\n")
+        for name in FILES:
+            self.assertTrue((target.parent / name).is_file())
+
+    def test_with_widget_tests_ref_pin_follows_ref(self) -> None:
+        self.flutter_app()
+        result = self.run_installer("--with-widget-tests", "--ref", "v1.4.0")
+        self.assert_success(result)
+        self.assertIn("@v1.4.0", self.installed("widget-tests.yml"))
 
 
 if __name__ == "__main__":

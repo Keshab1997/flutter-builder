@@ -60,7 +60,7 @@ distribution/whatsnew/whatsnew-bn-BD
 > directory যাচাই হয় — না পেলে run ওখানেই থেমে যায়, তাই ভুল path-এ
 > version code নষ্ট হয় না (Play-তে upload হয়ে গেলে সেটা ফেরানো যায় না)।
 
-**৫০০ character-এর সীমা (v1.16.0+):** প্রতিটি locale file-এ Play সর্বোচ্চ ৫০০
+**৫০০ character-এর সীমা (v1.15.2+):** প্রতিটি locale file-এ Play সর্বোচ্চ ৫০০
 character নেয়, আর সীমা ছাড়ালে ধরা পড়ে upload হয়ে যাওয়ার *পরে* — তখন version
 code খরচ হয়ে যায়। তাই একই check এখন প্রতিটি file-এর character সংখ্যা গুনে
 আগেই fail করে, আর `whatsnew-` দিয়ে নাম শুরু না হলে warning দেয় (Play ওই

@@ -18,20 +18,23 @@ Run from your project directory (or any directory inside its Git repository):
   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.16.1/scripts/install.sh | bash
 
 Options when running a downloaded/local script:
-  --app-dir DIR     Flutter app directory, relative to the Git repository root
-  --app-name NAME   Display name for GitHub Releases (default: the app's android:label, else the pubspec name)
-  --ref REF         Pin the reusable workflows to a tag/SHA (default: v1.16.1)
-  --dry-run         Show changes without writing files
-  --force           Replace differing workflows, backing up originals first
-  -h, --help        Show this help
+  --app-dir DIR           Flutter app directory, relative to the Git repository root
+  --app-name NAME         Display name for GitHub Releases (default: the app's android:label, else the pubspec name)
+  --ref REF               Pin the reusable workflows to a tag/SHA (default: v1.16.1)
+  --with-screenshots      Also install ui-screenshots.yml (manual UI screenshot caller)
+  --with-widget-tests     Also install widget-tests.yml (manual widget-test diagnostics caller)
+  --dry-run               Show changes without writing files
+  --force                 Replace differing workflows, backing up originals first
+  -h, --help              Show this help
 
 Options over a pipe: curl -fsSL URL | bash -s -- --app-dir apps/mobile --app-name "My App"
 Installs ci.yml, manual-build.yml, publish-release.yml and web-preview.yml into
-.github/workflows/ at the Git repository root. web-preview.yml also removes a
-branch's preview from gh-pages when that branch is deleted, and keeps the
-repository's About -> Website link on the default branch's preview when a
-credential is configured (see the README). Never adds GitHub secrets or pushes
-code. Only --force may replace an existing workflow.
+.github/workflows/ at the Git repository root; the two --with-* flags add
+ui-screenshots.yml and widget-tests.yml on top of those four. web-preview.yml
+also removes a branch's preview from gh-pages when that branch is deleted, and
+keeps the repository's About -> Website link on the default branch's preview
+when a credential is configured (see the README). Never adds GitHub secrets or
+pushes code. Only --force may replace an existing workflow.
 --force replaces whole files; to move an existing install to a new @ref
 without touching customised workflows, use scripts/bump-ref.sh.
 HELP
@@ -55,6 +58,8 @@ app_name=''
 ref="$DEFAULT_REF"
 force=false
 dry_run=false
+with_screenshots=false
+with_widget_tests=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --app-dir|--app-name|--ref)
@@ -68,10 +73,16 @@ while [ "$#" -gt 0 ]; do
       shift 2 ;;
     --force) force=true; shift ;;
     --dry-run) dry_run=true; shift ;;
+    --with-screenshots) with_screenshots=true; shift ;;
+    --with-widget-tests) with_widget_tests=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option: $1 (try --help)." ;;
   esac
 done
+# The four standard callers always install; the two diagnostic callers are
+# opt-in, so the default run installs exactly what it used to.
+if [ "$with_screenshots" = true ]; then FILES+=(ui-screenshots.yml); fi
+if [ "$with_widget_tests" = true ]; then FILES+=(widget-tests.yml); fi
 
 # A ref must be a tag-like name or a full commit SHA; no branch/URL/expression
 # interpolation in a generated workflow. The bundled publish wrapper must be
@@ -368,6 +379,165 @@ YAML
       contents: write
 YAML
 } > "$stage/web-preview.yml"
+
+# Optional callers, installed only with --with-screenshots /
+# --with-widget-tests. Same shape as the examples/project-workflows/ callers:
+# manual only, pinned to the same ref, and the resolved working-directory is
+# baked in like the standard four.
+if [ "$with_screenshots" = true ]; then
+{
+  cat <<'YAML'
+name: Flutter UI screenshots
+
+# Actions -> "Flutter UI screenshots" -> Run workflow, typing the routes you
+# want photographed (`/settings,/profile`). It is manual only: nothing runs on
+# a push or pull request. An agent can drive it too - `python3
+# tool/see_screen.py --route /settings` from the flutter-builder agent pack
+# dispatches this, waits and downloads the images, so a change can be *looked
+# at* instead of guessed at.
+#
+# The app needs web support (`web/` in the repository, or set
+# `generate-web-platform: true` below). Apps that use platform-only plugins
+# (camera, bluetooth, local notifications) will not render on web - the
+# capture step reports a blank screen instead of showing one silently.
+on:
+  workflow_dispatch:
+    inputs:
+      routes:
+        description: Comma separated app routes to photograph, e.g. /settings,/profile
+        required: false
+        default: "/"
+      viewports:
+        description: Comma separated WxH viewports
+        required: false
+        default: "390x844,768x1024"
+      wait-ms:
+        description: Milliseconds to let the app settle before each screenshot
+        required: false
+        default: "8000"
+      dart-defines:
+        description: Compile-time defines, one KEY=VALUE per line (never secrets)
+        required: false
+        default: ""
+      note:
+        description: Free text shown in the run name (see_screen.py sets this)
+        required: false
+        default: ""
+
+# The note makes a dispatched run findable: see_screen.py searches for the run
+# it just started by this title instead of guessing from timestamps.
+run-name: Flutter UI screenshots${{ inputs.note && format(' — {0}', inputs.note) || '' }}
+
+# Both are required: `contents: write` to push the images to the
+# `ui-screenshots` branch, `pull-requests: write` to comment them.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+YAML
+  printf '    uses: %s/ui-screenshots.yml@%s\n' "$REUSABLE" "$ref"
+  cat <<'YAML'
+    with:
+      flutter-channel: stable
+YAML
+  printf '      working-directory: %s\n' "$yaml_dir"
+  cat <<'YAML'
+      # List the screens this app actually has. `/` is the home screen; for
+      # anything deeper, give the route the app navigates to (`/settings`,
+      # `/profile`) or wire up an integration test. A dispatched run overrides
+      # this with the routes typed into the form / passed by see_screen.py.
+      routes: ${{ inputs.routes || '/' }}
+      viewports: ${{ inputs.viewports || '390x844,768x1024' }}
+      # `wait-ms` is a number in the reusable workflow, so the form's string is
+      # converted; the hyphenated input names need the bracket syntax.
+      wait-ms: ${{ fromJSON(inputs['wait-ms'] || '8000') }}
+      dart-defines: ${{ inputs['dart-defines'] || '' }}
+      # Apps that have never been built for the web have no web/ folder and
+      # `flutter build web` would fail. Set this once and the workflow generates
+      # the folder inside its own checkout (`flutter create --platforms=web .`):
+      # generate-web-platform: true
+      embed-in-pr: true
+    secrets: inherit
+YAML
+} > "$stage/ui-screenshots.yml"
+fi
+
+if [ "$with_widget_tests" = true ]; then
+{
+  cat <<'YAML'
+name: Flutter widget-test diagnostics
+
+# Actions -> Flutter widget-test diagnostics -> Run workflow for a fast
+# debug-mode check and a copyable error report. It is manual only: nothing
+# runs on a push or pull request.
+#
+# The tests must build the screen/route being checked. For a mobile overflow,
+# write the widget test at a phone-sized viewport; this workflow does not
+# launch an emulator or navigate the app by itself.
+on:
+  workflow_dispatch:
+    inputs:
+      flutter-channel:
+        description: Flutter channel
+        required: false
+        type: choice
+        options:
+          - stable
+          - beta
+          - master
+        default: stable
+      test-target:
+        description: Test file or directory (for example test/widget_test.dart)
+        required: false
+        type: string
+        default: test
+      codegen:
+        description: Code generation required before tests
+        required: false
+        type: choice
+        options:
+          - none
+          - build_runner
+          - gen-l10n
+          - both
+        default: none
+      test-concurrency:
+        description: 0 uses Flutter's default; a positive number limits workers
+        required: false
+        type: number
+        default: 0
+
+run-name: Flutter widget tests — ${{ inputs['test-target'] || 'test' }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: widget-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  widget-tests:
+YAML
+  printf '    uses: %s/flutter-widget-tests.yml@%s\n' "$REUSABLE" "$ref"
+  cat <<'YAML'
+    with:
+YAML
+  printf '      working-directory: %s\n' "$yaml_dir"
+  cat <<'YAML'
+      flutter-channel: ${{ inputs['flutter-channel'] || 'stable' }}
+      test-target: ${{ inputs['test-target'] || 'test' }}
+      codegen: ${{ inputs.codegen || 'none' }}
+      test-concurrency: ${{ inputs['test-concurrency'] || 0 }}
+YAML
+} > "$stage/widget-tests.yml"
+fi
 
 workflows="$repo_root/.github/workflows"
 changes=()
