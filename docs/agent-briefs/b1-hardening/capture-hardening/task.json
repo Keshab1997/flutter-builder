@@ -1,0 +1,20 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "C",
+  "task": "capture-hardening",
+  "allowed": [
+    "scripts/capture-pages.cjs",
+    "scripts/capture-screenshots.sh",
+    "scripts/manifest-summary.sh",
+    "tests/test_capture_pages.py"
+  ],
+  "commit": "fix(ui): harden screenshot polling, PNG decoding and manifest summary",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "arena/e0563147-flutter-builder",
+    "base_sha": "6efb8b1b8e4e8318e2cff779946003cb7a812cb4"
+  }
+}

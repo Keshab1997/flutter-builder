@@ -1,0 +1,20 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "B",
+  "task": "consumer-ref-safety",
+  "allowed": [
+    "scripts/bump-consumers.sh",
+    "scripts/bump-ref.sh",
+    "tests/test_bump_consumers.py",
+    "tests/test_bump_ref.py"
+  ],
+  "commit": "feat(scripts): add opt-in agent-pack consumer sync and symlink guards",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "arena/63d9ba0d-flutter-builder",
+    "base_sha": "74bb9a8274e06a6eb8e1b8d6710bebfea4056173"
+  }
+}
