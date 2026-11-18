@@ -12,12 +12,14 @@ No Flutter SDK, no network, no third-party modules.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-agent-pack.sh"
@@ -421,6 +423,98 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.repo / "tool").exists())
 
 
+    # -- .gitignore: the pack's throwaway artifacts stay out of git --------
+    def test_gitignore_lists_pack_artifacts(self) -> None:
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        lines = (self.repo / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn(".agent-screens/", lines)
+        self.assertIn(".agent-pack-backups/", lines)
+
+    def test_gitignore_rerun_is_idempotent_and_silent(self) -> None:
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        before = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        second = self.run_installer()
+        self.assert_success(second)
+        self.assertIn("already installed; nothing changed", second.stdout)
+        self.assertEqual((self.repo / ".gitignore").read_text(encoding="utf-8"),
+                         before)
+
+    def test_gitignore_dry_run_writes_nothing(self) -> None:
+        self.flutter_app()
+        result = self.run_installer("--dry-run")
+        self.assert_success(result)
+        self.assertFalse((self.repo / ".gitignore").exists())
+        self.assertIn("Will update: .gitignore", result.stdout)
+
+    def test_gitignore_dry_run_leaves_an_existing_file_alone(self) -> None:
+        self.flutter_app()
+        (self.repo / ".gitignore").write_text("*.tmp\n", encoding="utf-8")
+        result = self.run_installer("--dry-run")
+        self.assert_success(result)
+        self.assertEqual((self.repo / ".gitignore").read_text(encoding="utf-8"),
+                         "*.tmp\n")
+
+    def test_symlinked_gitignore_is_refused(self) -> None:
+        self.flutter_app()
+        outside = Path(self.temp.name) / "gitignore-target"
+        outside.write_text("*.tmp\n", encoding="utf-8")
+        (self.repo / ".gitignore").symlink_to(outside)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "*.tmp\n")
+        self.assertFalse((self.repo / "tool").exists())
+
+    def test_symlinked_gitignore_is_refused_even_when_complete(self) -> None:
+        self.flutter_app()
+        outside = Path(self.temp.name) / "gitignore-target"
+        outside.write_text(".agent-screens/\n.agent-pack-backups/\n",
+                           encoding="utf-8")
+        (self.repo / ".gitignore").symlink_to(outside)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"),
+                         ".agent-screens/\n.agent-pack-backups/\n")
+
+    def test_directory_gitignore_is_refused(self) -> None:
+        self.flutter_app()
+        (self.repo / ".gitignore").mkdir()
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a regular file", result.stderr)
+
+    def test_gitignore_without_trailing_newline_is_repaired(self) -> None:
+        """An entry must never be glued onto an unterminated last line."""
+        self.flutter_app()
+        (self.repo / ".gitignore").write_text("*.tmp", encoding="utf-8")
+        self.assert_success(self.run_installer())
+        text = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("\n.agent-screens/\n", text)
+        self.assertIn("\n.agent-pack-backups/\n", text)
+        self.assertEqual(text.count(".agent-screens/"), 1)
+        second = self.run_installer()
+        self.assert_success(second)
+        self.assertIn("already installed; nothing changed", second.stdout)
+        self.assertEqual((self.repo / ".gitignore").read_text(encoding="utf-8"),
+                         text)
+
+    def test_gitignore_adds_only_the_missing_entries(self) -> None:
+        self.flutter_app()
+        (self.repo / ".gitignore").write_text(".agent-screens/\n", encoding="utf-8")
+        self.assert_success(self.run_installer())
+        text = (self.repo / ".gitignore").read_text(encoding="utf-8")
+        self.assertEqual(text.count(".agent-screens/"), 1)
+        self.assertEqual(text.count(".agent-pack-backups/"), 1)
+
+    def test_top_comment_does_not_claim_default_branch_refusal(self) -> None:
+        header = "\n".join(SCRIPT.read_text(encoding="utf-8").splitlines()[:30])
+        self.assertNotIn("Refuses to commit on the", header)
+        self.assertNotIn("default branch", header)
+
+
 class PreflightToolTests(unittest.TestCase):
     """The shipped checker must catch the failure that motivated it."""
 
@@ -565,6 +659,145 @@ class PreflightToolTests(unittest.TestCase):
         self.assertIn("orphan file", result.stdout)
         self.assertIn("ambiguous_import", result.stdout)
 
+    def test_super_key_parameter_is_ignored(self) -> None:
+        """`super.key` is forwarded to the superclass, not an owned slot."""
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class Home extends StatelessWidget {
+              const Home();
+              @override
+              Widget build(BuildContext context) => const _Tile();
+            }
+
+            class _Tile extends StatelessWidget {
+              const _Tile({super.key});
+              @override
+              Widget build(BuildContext context) => const SizedBox();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unused_element_parameter", result.stdout)
+
+    def test_export_show_barrel_is_not_flagged(self) -> None:
+        """A barrel re-export is not an unused import in the importing file."""
+        for line in ("export 'package:demo_app/thing.dart' show Thing;",
+                     'export "package:demo_app/thing.dart" show Thing;'):
+            with self.subTest(line=line):
+                result = self.run_preflight(line + "\n\nclass A {}\n")
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn("unused_import", result.stdout)
+
+    def test_typed_super_parameter_is_ignored(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class Home extends StatelessWidget {
+              const Home();
+              @override
+              Widget build(BuildContext context) => const _Tile();
+            }
+
+            class _Tile extends StatelessWidget {
+              const _Tile({Key? super.key});
+              @override
+              Widget build(BuildContext context) => const SizedBox();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("unused_element_parameter", result.stdout)
+
+    def test_double_quoted_import_alias_is_reported(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            import "package:flutter/material.dart" as mat;
+
+            class A {
+              void go() {}
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("import alias 'mat' is unused", result.stdout)
+
+    def test_double_quoted_show_is_reported(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            import "package:demo_app/thing.dart" show Thing;
+
+            class A {}
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("'Thing' shown in import but unused", result.stdout)
+
+    def test_export_alias_is_not_flagged(self) -> None:
+        """check_imports() is import-only; a barrel re-export is not an import."""
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            export "package:demo_app/thing.dart" as thing;
+
+            class A {}
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("unused_import", result.stdout)
+
+    def test_hide_before_show_is_reported(self) -> None:
+        """The combinators may legally appear in either order."""
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            import 'package:demo_app/thing.dart' hide Other show Thing;
+
+            class A {}
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("'Thing' shown in import but unused", result.stdout)
+
+    def test_unused_arrow_function_is_reported(self) -> None:
+        result = self.run_preflight("void _helper() => doThing();\n")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private function _helper is never used", result.stdout)
+
+    def test_used_arrow_function_is_not_reported(self) -> None:
+        result = self.run_preflight(
+            "void _helper() => doThing();\nvoid call() => _helper();\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_function_used_above_its_definition_is_not_reported(self) -> None:
+        """Dart resolves top-level functions regardless of order."""
+        result = self.run_preflight(
+            "void call() => _helper();\nvoid _helper() => doThing();\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unused_async_generator_is_reported(self) -> None:
+        result = self.run_preflight("Stream<int> _nums() async* { yield 1; }\n")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private function _nums is never used", result.stdout)
+
+    def test_unused_sync_generator_is_reported(self) -> None:
+        result = self.run_preflight("Iterable<int> _iter() sync* { yield 1; }\n")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private function _iter is never used", result.stdout)
+
+    def test_names_in_raw_and_triple_quoted_strings_do_not_count(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            class _Hidden {
+              const _Hidden();
+            }
+
+            var a = r'_Hidden';
+            var b = '''_Hidden''';
+            var c = \"\"\"_Hidden\"\"\";
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private class _Hidden is never used", result.stdout)
+
     def test_clean_file_passes(self) -> None:
         result = self.run_preflight(textwrap.dedent(
             """\
@@ -580,6 +813,79 @@ class PreflightToolTests(unittest.TestCase):
         ))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("0 issue(s)", result.stdout)
+
+
+class PreflightStringBlankingTests(unittest.TestCase):
+    """`blanked()` must erase every Dart string shape and keep the lines."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "preflight_under_test", str(PACK / "preflight.py"))
+        cls.preflight = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.preflight)
+
+    def test_multiline_strings_keep_the_line_count(self) -> None:
+        src = (
+            "var a = r'''_Hidden\nstill'''\n"
+            "var b = '''_Hidden\nstill'''\n"
+            'var c = """_Hidden\nstill"""\n'
+            "var d = r'_Hidden';\n"
+        )
+        out = self.preflight.blanked(src)
+        self.assertEqual(out.count("\n"), src.count("\n"))
+        self.assertNotIn("_Hidden", out)
+
+    def test_backslash_does_not_escape_a_raw_string(self) -> None:
+        out = self.preflight.blanked("var a = r'C:\\path\\_Hidden';\n")
+        self.assertNotIn("_Hidden", out)
+
+    def test_escaped_quote_does_not_end_a_normal_string(self) -> None:
+        out = self.preflight.blanked("var a = 'it\\'s _Hidden';\n")
+        self.assertNotIn("_Hidden", out)
+
+
+class LocalScreenshotsTests(unittest.TestCase):
+    """The registry reader and the missing-SDK hint."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "local_screenshots_under_test", str(PACK / "local_screenshots.py"))
+        cls.shots = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.shots)
+
+    def test_known_shots_reads_single_and_double_quotes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = Path(td) / "shot_registry.dart"
+            registry.write_text(textwrap.dedent(
+                """\
+                const shots = [
+                  Shot(name: 'home', build: _Home()),
+                  Shot(name: "settings", build: _Settings()),
+                ];
+                """
+            ), encoding="utf-8")
+            original = self.shots.REGISTRY
+            self.shots.REGISTRY = registry
+            try:
+                self.assertEqual(self.shots.known_shots(), ["home", "settings"])
+            finally:
+                self.shots.REGISTRY = original
+
+    def test_missing_flutter_hint_points_at_bootstrap_setup(self) -> None:
+        with mock.patch.object(self.shots.shutil, "which", return_value=None), \
+                mock.patch.object(self.shots.Path, "is_file",
+                                  return_value=False), \
+                mock.patch.dict(self.shots.os.environ, {"FLUTTER_ROOT": ""}):
+            with self.assertRaises(SystemExit) as ctx:
+                self.shots.find_flutter()
+        message = str(ctx.exception)
+        self.assertIn(
+            "https://raw.githubusercontent.com/Keshab1997/flutter-bootstrap/"
+            "main/setup.sh", message)
+        self.assertIn("--quiet --json", message)
+        self.assertNotIn("flutter-builder/main/scripts/install.sh", message)
 
 
 if __name__ == "__main__":

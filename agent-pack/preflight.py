@@ -44,8 +44,25 @@ import sys
 
 # Comments and string literals are blanked before any matching so that a class
 # name inside a doc comment cannot count as a use of it. Line numbers survive.
+# Dart has more than one string shape, and each must be blanked as a unit:
+#   * raw strings (`r'...'`, `r"..."`) - a backslash is literal there, so it
+#     does NOT escape the closing quote;
+#   * triple-quoted strings (`'''...'''`, `"""..."""`), which span lines; a
+#     lone quote inside them is just a character.
+# Order matters: triple-quoted before single-line, raw before ordinary.
 COMMENT_OR_STRING = re.compile(
-    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'", re.S)
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r"|[rR]'''(?:[^']|'(?!''))*?'''"
+    r'|[rR]"""(?:[^"]|"(?!""))*?"""'
+    r"|[rR]'[^'\n]*'"
+    r'|[rR]"[^"\n]*"'
+    r"|'''(?:\\[\s\S]|[^']|'(?!''))*?'''"
+    r'|"""(?:\\[\s\S]|[^"]|"(?!""))*?"""'
+    r"|'(?:\\[\s\S]|[^'\\\n])*'"
+    r'|"(?:\\[\s\S]|[^"\\\n])*"',
+    re.S,
+)
 
 # Return types this script bothers to look at for private functions. Dart has
 # more, but a miss here only means one fewer advisory line.
@@ -53,8 +70,11 @@ FUNCTION_RE = re.compile(
     r"(?m)^[ \t]*(?:static\s+)?(?:Future<[^>]*>|void|int|double|bool|String|"
     r"Widget|List<[^>]*>|Map<[^>]*>|[A-Z]\w*(?:<[^>]*>)?\??)\s+(_\w+)\s*\(")
 
+# `import` only: a barrel `export '...' show Foo;` is not an unused import when
+# Foo is not referenced locally, and flagging it would be a false positive.
+# Cross-file resolution still uses IMPORT_OR_EXPORT_RE below, which keeps both.
 IMPORT_RE = re.compile(
-    r"(?m)^\s*import\s+'([^']+)'\s*(?:as\s+(\w+))?\s*(?:show\s+([^;]+))?;")
+    r"(?m)^\s*import\s+[\"'](?P<uri>[^\"']+)[\"'](?P<tail>[^;]*);")
 
 # Comments only; `blanked()` also removes string literals and is therefore
 # unusable for import scanning. See without_comments().
@@ -146,6 +166,10 @@ def optional_named_params(params: str) -> list[str]:
     for p in split_params(section):
         if not p or p.startswith("@") or "required" in p:
             continue
+        if re.search(r"\bsuper\.", p):
+            # `super.key` (and typed forms like `Key? super.key`) is forwarded
+            # to the superclass, not an optional slot of this class.
+            continue
         m = re.search(r"\bthis\.(\w+)", p)
         if m:
             names.append(m.group(1))
@@ -208,29 +232,50 @@ def check_private_functions(path: pathlib.Path, text: str) -> list[str]:
                     break
         if params_close is None:
             continue
-        after = text[fm.end() + params_close:]
-        if not re.match(r"\s*(?:async\s*)?\{", after):
+        # `params_close` is the index of the closing `)`, so the body starts one
+        # character later; starting at `)` made every definition look abstract.
+        body_start = fm.end() + params_close + 1
+        after = text[body_start:]
+        if not re.match(r"\s*(?:(?:async|sync)\s*\*?\s*)?(?:\{|=>)", after):
             continue  # abstract / declaration only, not a definition
-        body_start = fm.end() + params_close
-        if not re.search(rf"\b{re.escape(fn)}\b", text[body_start:]):
+        # Search everywhere except the declaration itself: Dart lets a function
+        # be used above its definition, and a recursive call counts as a use.
+        rest = text[:fm.start()] + text[fm.end():]
+        if not re.search(rf"\b{re.escape(fn)}\b", rest):
             problems.append(f"{path}:{line_of(text, fm.start())}: private "
                             f"function {fn} is never used (unused_element)")
     return problems
+
+
+def import_tail(tail: str) -> tuple[str | None, list[str]]:
+    """`as` alias and `show` names from an import/export clause.
+
+    `hide` may legally come before `show`, so the combinators are read in order
+    instead of assuming one fixed position.
+    """
+    alias_match = re.search(r"\bas\s+(\w+)", tail)
+    alias = alias_match.group(1) if alias_match else None
+    shown: list[str] = []
+    for cm in re.finditer(r"\bshow\s+([^;]+?)(?=\s+(?:show|hide)\b|$)", tail):
+        shown += [n.strip() for n in cm.group(1).split(",") if n.strip()]
+    return alias, shown
 
 
 def check_imports(path: pathlib.Path, text: str) -> list[str]:
     problems: list[str] = []
     for im in IMPORT_RE.finditer(text):
         line = line_of(text, im.start())
-        alias, shown = im.group(2), im.group(3)
-        if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", text):
+        alias, shown = import_tail(im.group("tail"))
+        # Look for uses outside the statement itself, so a name that also occurs
+        # in the URI (`thing` in `thing.dart`) cannot count as a use.
+        rest = text[:im.start()] + text[im.end():]
+        if alias and not re.search(rf"\b{re.escape(alias)}\s*\.", rest):
             problems.append(f"{path}:{line}: import alias '{alias}' is unused "
                             f"(unused_import)")
-        if shown:
-            for name in (n.strip() for n in shown.split(",")):
-                if name and len(re.findall(rf"\b{re.escape(name)}\b", text)) < 2:
-                    problems.append(f"{path}:{line}: '{name}' shown in import "
-                                    f"but unused (unused_import)")
+        for name in shown:
+            if not re.search(rf"\b{re.escape(name)}\b", rest):
+                problems.append(f"{path}:{line}: '{name}' shown in import "
+                                f"but unused (unused_import)")
     return problems
 
 
@@ -274,7 +319,8 @@ def check_private_fields(path: pathlib.Path, raw: str, text: str) -> list[str]:
     return problems
 
 
-IMPORT_OR_EXPORT_RE = re.compile(r"(?m)^\s*(?:import|export)\s+'([^']+)'")
+IMPORT_OR_EXPORT_RE = re.compile(
+    r"(?m)^\s*(?:import|export)\s+[\"']([^\"']+)[\"']")
 DECL_RE = re.compile(r"(?m)^\s*(?:abstract\s+)?(?:class|enum|mixin|"
                      r"extension|typedef)\s+([A-Z]\w*)")
 

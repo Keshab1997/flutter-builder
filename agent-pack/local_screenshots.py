@@ -65,7 +65,7 @@ def find_flutter() -> str:
         "local_screenshots: flutter not found.\n"
         "  Put it on PATH, set FLUTTER_ROOT, or install it:\n"
         "  bash <(curl -fsSL https://raw.githubusercontent.com/Keshab1997/"
-        "flutter-builder/main/scripts/install.sh)"
+        "flutter-bootstrap/main/setup.sh) --quiet --json"
     )
 
 
@@ -84,7 +84,12 @@ def known_shots() -> list[str]:
     source = "\n".join(
         line for line in source.splitlines() if not line.lstrip().startswith("//")
     )
-    return re.findall(r"\bname:\s*'([^']+)'", source)
+    # `name:` is a plain Dart argument, so either quote style is legal; the
+    # registry is user-owned and must not silently drop double-quoted shots.
+    return [
+        m.group(1) if m.group(1) is not None else m.group(2)
+        for m in re.finditer(r"\bname:\s*(?:'([^']+)'|\"([^\"]+)\")", source)
+    ]
 
 
 def main() -> int:
