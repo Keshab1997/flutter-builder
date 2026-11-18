@@ -73,6 +73,13 @@ on:
         required: false
         type: number
         default: 8000
+      url-strategy:
+        description: >-
+          Flutter web URL strategy: `hash` (default, visits `<base>/#<route>`)
+          or `path` (visits `<base><route>` for apps using `usePathUrlStrategy`).
+        required: false
+        type: string
+        default: "hash"
       embed-in-pr:
         description: >-
           Push the images to the screenshots branch and comment them on the
@@ -137,12 +144,14 @@ jobs:
 
       - name: Run code generation
         if: inputs.codegen != 'none' && inputs.codegen != ''
+        env:
+          CODEGEN: ${{ inputs.codegen }}
         run: |
           set -euo pipefail
-          case "${{ inputs.codegen }}" in
+          case "$CODEGEN" in
             build_runner|both) dart run build_runner build --delete-conflicting-outputs ;;
           esac
-          case "${{ inputs.codegen }}" in
+          case "$CODEGEN" in
             gen-l10n|both) flutter gen-l10n ;;
           esac
 
@@ -169,14 +178,20 @@ jobs:
           path: .flutter-builder
 
       - name: Capture screenshots
+        env:
+          ROUTES: ${{ inputs.routes }}
+          VIEWPORTS: ${{ inputs.viewports }}
+          WAIT_MS: ${{ inputs.wait-ms }}
+          URL_STRATEGY: ${{ inputs.url-strategy }}
         run: |
           set -euo pipefail
           bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/capture-screenshots.sh" \
             --build-dir build/web \
             --out ui-screenshots \
-            --routes "${{ inputs.routes }}" \
-            --viewports "${{ inputs.viewports }}" \
-            --wait-ms "${{ inputs.wait-ms }}"
+            --routes "$ROUTES" \
+            --viewports "$VIEWPORTS" \
+            --wait-ms "$WAIT_MS" \
+            --url-strategy "$URL_STRATEGY"
 
       - name: Add the screenshot table to the summary
         # The table is built by a script, not by inline YAML: the first version
@@ -215,5 +230,5 @@ jobs:
         run: |
           bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/embed-screenshots.sh" \
             --src ui-screenshots \
-            --branch "${{ inputs.screenshots-branch }}" \
+            --branch "$SCREENSHOTS_BRANCH" \
             --comment-out "$RUNNER_TEMP/ui-screenshots-comment.md"

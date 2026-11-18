@@ -151,7 +151,7 @@ jobs:
             exit 0
           fi
           if [ "$EVENT_NAME" = "delete" ] && [ "$branch" = "$REF_NAME" ]; then
-            echo "::warning::This delete event carried no deleted ref, so no preview was removed. Pass the deleted ref from the caller, e.g. branch-name: \${{ github.event.ref }}."
+            echo "::warning::This delete event carried no deleted ref, so no preview was removed. Pass the deleted ref from the caller, e.g. branch-name: \${""{ github.event.ref }}."
           fi
           if [ "$branch" = "$PAGES_BRANCH" ]; then
             skip "$branch is the pages branch itself"
@@ -194,6 +194,7 @@ jobs:
           {
             echo "skip=false"
             echo "branch=$branch"
+            echo "slug=$slug"
             echo "directory=$directory"
           } >> "$GITHUB_OUTPUT"
           echo "Deleted branch: $branch"
@@ -296,3 +297,28 @@ jobs:
             echo "Branch \`$BRANCH\` was deleted, so \`$DIRECTORY\` ($files files, $size) was removed from \`$PAGES_BRANCH\`."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Removed $DIRECTORY ($files files, $size) from $PAGES_BRANCH"
+
+      - name: Check out this builder (for the preview hub index)
+        id: builder
+        if: steps.remove.outputs.removed == 'true' && inputs.destination-dir == ''
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          repository: Keshab1997/flutter-builder
+          # The hub script ships with the preview workflows, so all three stay
+          # pinned to the same release tag.
+          ref: v1.16.1
+          path: .flutter-builder
+
+      - name: Refresh the preview hub index
+        if: steps.remove.outputs.removed == 'true' && inputs.destination-dir == '' && steps.builder.outcome == 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_BRANCH: ${{ inputs.pages-branch }}
+          PREVIEW_DIR: ${{ inputs.preview-directory }}
+          REMOVE_SLUG: ${{ steps.resolve.outputs.slug }}
+        run: |
+          bash "$GITHUB_WORKSPACE/.flutter-builder/scripts/preview-hub.sh" \
+            --preview-dir "$PREVIEW_DIR" \
+            --remove "$REMOVE_SLUG"

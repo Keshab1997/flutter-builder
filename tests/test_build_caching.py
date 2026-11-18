@@ -116,8 +116,13 @@ class OptInKnobTests(unittest.TestCase):
         body = input_block(self.text, "format-paths")
         self.assertIn('default: "."', body)
         self.assertEqual(
-            self.text.count("dart format --output=none --set-exit-if-changed "
-                            "${{ inputs.format-paths }}"), 2)
+            self.text.count("FORMAT_PATHS: ${{ inputs.format-paths }}"), 2)
+        self.assertEqual(
+            self.text.count(
+                'dart format --output=none --set-exit-if-changed "${format_paths[@]}"'
+            ),
+            2,
+        )
 
     def test_test_concurrency_stays_off_by_default(self) -> None:
         self.assertIn("default: 0", input_block(self.text, "test-concurrency"))

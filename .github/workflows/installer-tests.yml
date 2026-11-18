@@ -12,9 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Shell syntax
-        run: bash -n scripts/install.sh
+      - name: Shell syntax (all scripts)
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
       - name: ShellCheck (warnings and errors only)
         run: shellcheck -S warning scripts/*.sh
-      - name: Installer integration tests (no Flutter SDK required)
+      - name: Node syntax (screenshot capture helper)
+        run: node --check scripts/capture-pages.cjs
+      - name: Agent-pack payload parity
+        run: python3 scripts/sync-agent-pack.py --check
+      - name: Release-pin consistency
+        run: python3 scripts/prepare-release.py --check
+      - name: Full offline test suite (no Flutter SDK required)
         run: python3 -m unittest discover -s tests -v

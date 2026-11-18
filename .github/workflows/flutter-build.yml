@@ -409,9 +409,12 @@ jobs:
 
       - name: Resolve Flutter version
         id: flutter-version
+        env:
+          USE_FVM: ${{ inputs.use-fvm }}
+          FLUTTER_CHANNEL: ${{ inputs.flutter-channel }}
         run: |
           version=""
-          if [ "${{ inputs.use-fvm }}" = "true" ]; then
+          if [ "$USE_FVM" = "true" ]; then
             if [ -f .fvmrc ]; then
               version="$(python3 - <<'PYTHON'
           import json, re
@@ -423,14 +426,14 @@ jobs:
           PYTHON
           )"
             else
-              echo "::warning::use-fvm is set but no .fvmrc file was found; using the ${{ inputs.flutter-channel }} channel."
+              echo "::warning::use-fvm is set but no .fvmrc file was found; using the $FLUTTER_CHANNEL channel."
             fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ -n "$version" ]; then
             echo "Using the Flutter version pinned in .fvmrc: $version"
           else
-            echo "Using the ${{ inputs.flutter-channel }} Flutter channel."
+            echo "Using the $FLUTTER_CHANNEL Flutter channel."
           fi
 
       - name: Set up Flutter
@@ -463,6 +466,8 @@ jobs:
 
       - name: Generate Android platform when missing
         if: inputs.generate-android-platform
+        env:
+          ANDROID_ORG: ${{ inputs.android-organization }}
         run: |
           if [ ! -d android ]; then
             project_name="$(awk '/^name:/{print $2; exit}' pubspec.yaml)"
@@ -471,7 +476,7 @@ jobs:
               --platforms=android \
               --no-pub \
               --project-name "$project_name" \
-              --org "${{ inputs.android-organization }}" \
+              --org "$ANDROID_ORG" \
               "$temp_dir/generated"
             cp -a "$temp_dir/generated/android" ./android
             rm -rf "$temp_dir"
@@ -499,24 +504,30 @@ jobs:
 
       - name: Run code generation
         if: inputs.codegen != 'none' && inputs.codegen != ''
+        env:
+          CODEGEN: ${{ inputs.codegen }}
         run: |
-          case "${{ inputs.codegen }}" in
+          case "$CODEGEN" in
             build_runner|both)
               echo "Running build_runner build..."
               dart run build_runner build --delete-conflicting-outputs
               ;;
           esac
-          case "${{ inputs.codegen }}" in
+          case "$CODEGEN" in
             gen-l10n|both)
               echo "Generating localizations..."
               flutter gen-l10n
               ;;
           esac
-          echo "Code generation finished (${{ inputs.codegen }})."
+          echo "Code generation finished ($CODEGEN)."
 
       - name: Check Dart formatting
         if: inputs.run-format-check
-        run: dart format --output=none --set-exit-if-changed ${{ inputs.format-paths }}
+        env:
+          FORMAT_PATHS: ${{ inputs.format-paths }}
+        run: |
+          read -r -a format_paths <<< "$FORMAT_PATHS"
+          dart format --output=none --set-exit-if-changed "${format_paths[@]}"
 
       - name: Analyze source code
         if: inputs.run-analyze
@@ -1002,6 +1013,7 @@ jobs:
         if: inputs.build-aab
         env:
           GRADLE_DART_DEFINES: ${{ steps.dart-defines.outputs.gradle-dart-defines }}
+          OBFUSCATE: ${{ inputs.obfuscate }}
         run: |
           dart_define_args=()
           while IFS= read -r line; do
@@ -1023,14 +1035,23 @@ jobs:
           # fail at the strip) and then ensure the artifact exists by invoking
           # Gradle's bundleRelease directly, bypassing Flutter's broken wrapper.
           extra_args=()
-          if [ "${{ inputs.obfuscate }}" = "true" ]; then
+          gradle_extra_args=()
+          if [ "${OBFUSCATE}" = "true" ]; then
+            mkdir -p build/symbols
             extra_args+=(--obfuscate --split-debug-info=build/symbols)
+            gradle_extra_args+=(
+              "-Pextra-gen-snapshot-options=--obfuscate"
+              "-Psplit-debug-info=$PWD/build/symbols"
+            )
           fi
           flutter build appbundle --no-pub --release ${extra_args[@]+"${extra_args[@]}"} "${dart_define_args[@]}" || true
-          # The fallback must receive the same defines, otherwise the bundle
-          # would silently compile with the app's defaults (e.g. test ad units).
+          # The fallback must receive the same defines and obfuscation/symbol
+          # flags, otherwise the bundle would silently compile unobfuscated or
+          # with the app's defaults (e.g. test ad units).
           test -f build/app/outputs/bundle/release/app-release.aab || (
-            cd android && ./gradlew bundleRelease ${GRADLE_DART_DEFINES:+"-Pdart-defines=$GRADLE_DART_DEFINES"}
+            cd android && ./gradlew bundleRelease \
+              ${GRADLE_DART_DEFINES:+"-Pdart-defines=$GRADLE_DART_DEFINES"} \
+              ${gradle_extra_args[@]+"${gradle_extra_args[@]}"}
           )
 
       - name: Restore .env after Android build
@@ -1736,8 +1757,12 @@ jobs:
         if: always() && inputs.notify-webhook != ''
         env:
           WEBHOOK_URL: ${{ inputs.notify-webhook }}
+          JOB_STATUS: ${{ job.status }}
+          REPO_NAME: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          message="Flutter build ${{ job.status }} for ${{ github.repository }} @ ${{ github.ref_name }} (${{ github.sha }})"
+          message="Flutter build $JOB_STATUS for $REPO_NAME @ $REF_NAME ($COMMIT_SHA)"
           payload="$(WEBHOOK_URL="$WEBHOOK_URL" MESSAGE="$message" python3 - <<'PYTHON'
           import json, os
           print(json.dumps({"content": os.environ["MESSAGE"], "text": os.environ["MESSAGE"]}))
@@ -1761,8 +1786,10 @@ jobs:
     steps:
       - name: Build the channel list
         id: channels
+        env:
+          TEST_MATRIX: ${{ inputs.test-matrix }}
         run: |
-          raw="${{ inputs.test-matrix }}"
+          raw="$TEST_MATRIX"
           case "$raw" in
             \[*)
               echo "channels=$raw" >> "$GITHUB_OUTPUT"
@@ -1772,7 +1799,7 @@ jobs:
               echo "channels=$channels" >> "$GITHUB_OUTPUT"
               ;;
           esac
-          echo "Channels to validate: ${{ inputs.test-matrix }}"
+          echo "Channels to validate: $TEST_MATRIX"
 
   matrix-validate:
     name: Validate on ${{ matrix.flutter-channel }}
@@ -1809,7 +1836,11 @@ jobs:
 
       - name: Check Dart formatting
         if: inputs.run-format-check
-        run: dart format --output=none --set-exit-if-changed ${{ inputs.format-paths }}
+        env:
+          FORMAT_PATHS: ${{ inputs.format-paths }}
+        run: |
+          read -r -a format_paths <<< "$FORMAT_PATHS"
+          dart format --output=none --set-exit-if-changed "${format_paths[@]}"
 
       - name: Analyze source code
         if: inputs.run-analyze

@@ -210,14 +210,18 @@ jobs:
             --branch-dir "${{ steps.paths.outputs.dest-dir }}"
 
       - name: Add preview URL to the step summary
+        env:
+          PREVIEW_URL: ${{ steps.paths.outputs.url }}
+          DEST_DIR_INPUT: ${{ inputs.destination-dir }}
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           {
             echo "## Web preview"
             echo ""
-            echo "Open in a browser: ${{ steps.paths.outputs.url }}"
-            if [ "${{ inputs.destination-dir }}" = "" ]; then
+            echo "Open in a browser: $PREVIEW_URL"
+            if [ -z "$DEST_DIR_INPUT" ]; then
               echo ""
-              echo "All previews: https://${{ github.repository_owner }}.github.io/${GITHUB_REPOSITORY#*/}/preview/"
+              echo "All previews: https://${REPO_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/preview/"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

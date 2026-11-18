@@ -1682,7 +1682,11 @@ def fetch_artifact(repo: str, run: dict, out: Path, token: str) -> list[Path]:
         token).get("artifacts", []) if not a.get("expired")]
     if not artifacts:
         raise SystemExit(f"see_screen: the run produced no artifact - {run['html_url']}")
-    named = [a for a in artifacts if a.get("name") == "ui-screenshots"]
+    named = [
+        a for a in artifacts
+        if a.get("name") == "ui-screenshots"
+        or str(a.get("name") or "").startswith("ui-screenshots-")
+    ]
     artifact = (named or artifacts)[0]
     blob = api("GET", f"/repos/{repo}/actions/artifacts/{artifact['id']}/zip",
                token, raw=True, timeout=180)

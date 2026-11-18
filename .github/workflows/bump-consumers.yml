@@ -29,6 +29,11 @@ on:
         required: false
         type: boolean
         default: false
+      with-agent-pack:
+        description: "Also refresh the agent pack in repositories whose root AGENTS.md already carries the managed block."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,6 +76,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           INPUT_REPOS: ${{ inputs.repos }}
           DRY_RUN: ${{ inputs.dry-run }}
+          WITH_AGENT_PACK: ${{ inputs.with-agent-pack }}
         run: |
           set -euo pipefail
           args=(--ref "$TARGET_REF" --owner "$OWNER")
@@ -79,5 +85,8 @@ jobs:
           fi
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
+          fi
+          if [ "$WITH_AGENT_PACK" = "true" ]; then
+            args+=(--with-agent-pack)
           fi
           bash scripts/bump-consumers.sh "${args[@]}"
