@@ -65,6 +65,15 @@ fi
 
 workflows="$repo_root/.github/workflows"
 [ -d "$workflows" ] || fail "No .github/workflows under $repo_root - run from a repository that already has flutter-builder callers."
+# Never write through symlinks: a symlinked .github, .github/workflows, or
+# target workflow file would let an attacker redirect writes outside the repo.
+[ -L "$repo_root/.github" ] && fail ".github is a symlink; refusing to write through it."
+[ -L "$workflows" ] && fail ".github/workflows is a symlink; refusing to write through it."
+
+# Temporary file lives next to its target so mv stays atomic on one
+# filesystem, and the trap removes any leftover temp after an interrupted run.
+tmp=""
+trap 'rm -f -- "$tmp" 2>/dev/null || true' EXIT
 
 pin_re="${SED_PREFIX}[A-Za-z0-9_.-]+\.ya?ml@[^[:space:]#\"']+"
 changed=0
@@ -75,16 +84,19 @@ say "Repository: $repo_root"
 say "Target pin: @$ref"
 for file in "$workflows"/*.yml "$workflows"/*.yaml; do
   [ -e "$file" ] || continue
+  [ -L "$file" ] && fail "$file is a symlink; refusing to write through it."
   grep -q "$REUSABLE" "$file" || continue
   pins=$(grep -oE "$pin_re" "$file" | wc -l | tr -d ' ' || true)
   total_pins=$((total_pins + pins))
   old_refs=$(grep -oE "$pin_re" "$file" | sed 's/.*@//' | sort -u | tr '\n' ' ' | sed 's/ $//' || true)
   name=".github/workflows/$(basename "$file")"
 
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$workflows/.bump-ref.XXXXXX")" \
+    || fail "cannot create temporary file in $workflows"
   sed -E "s#(${SED_PREFIX}[A-Za-z0-9_.-]+\.ya?ml)@[^[:space:]#\"']+#\1@${ref}#g" "$file" > "$tmp"
   if cmp -s "$file" "$tmp"; then
     rm -f -- "$tmp"
+    tmp=""
     unchanged=$((unchanged + 1))
     say "already current ($pins pins): $name"
     continue
@@ -92,11 +104,13 @@ for file in "$workflows"/*.yml "$workflows"/*.yaml; do
   changed=$((changed + 1))
   if [ "$dry_run" = true ]; then
     rm -f -- "$tmp"
+    tmp=""
     say "would update ($pins pins: $old_refs -> $ref): $name"
     continue
   fi
   chmod 644 "$tmp"
   mv -f -- "$tmp" "$file"
+  tmp=""
   say "updated ($pins pins: $old_refs -> $ref): $name"
 done
 
