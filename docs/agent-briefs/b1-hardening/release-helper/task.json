@@ -1,0 +1,18 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "C",
+  "task": "release-helper",
+  "allowed": [
+    "scripts/prepare-release.py",
+    "tests/test_prepare_release.py"
+  ],
+  "commit": "feat(release): add prepare-release pin-sync and drift-check helper",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "arena/e0563147-flutter-builder",
+    "base_sha": "053b89fe96bd7fa02732674fcdda20201c335e9f"
+  }
+}
