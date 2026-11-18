@@ -1,0 +1,22 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "C",
+  "task": "doctor-and-installer",
+  "allowed": [
+    "README.md",
+    "docs/PLAY_INTERNAL_TESTING.md",
+    "scripts/doctor.sh",
+    "scripts/install.sh",
+    "tests/test_doctor.py",
+    "tests/test_install.py"
+  ],
+  "commit": "feat(scripts): harden doctor checks, add optional installer flags and tests",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "auto",
+    "base_sha": "17efe3b412632372217cf6a6a0b5ab4828f67620"
+  }
+}

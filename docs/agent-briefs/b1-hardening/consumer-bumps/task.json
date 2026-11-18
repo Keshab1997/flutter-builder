@@ -1,0 +1,20 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "B",
+  "task": "consumer-bumps",
+  "allowed": [
+    "scripts/bump-consumers.sh",
+    "scripts/bump-pubspec-version.py",
+    "tests/test_bump_consumers.py",
+    "tests/test_bump_pubspec_version.py"
+  ],
+  "commit": "fix(scripts): supersede stale consumer bump PRs and harden version bump",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "auto",
+    "base_sha": "17efe3b412632372217cf6a6a0b5ab4828f67620"
+  }
+}

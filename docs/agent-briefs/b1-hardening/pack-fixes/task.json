@@ -1,0 +1,22 @@
+{
+  "repo": "Keshab1997/flutter-builder",
+  "worker": "A",
+  "task": "pack-fixes",
+  "allowed": [
+    "agent-pack/agent_loop.py",
+    "agent-pack/local_screenshots.py",
+    "agent-pack/preflight.py",
+    "scripts/install-agent-pack.sh",
+    "tests/test_agent_loop.py",
+    "tests/test_agent_pack.py"
+  ],
+  "commit": "fix(pack): harden preflight, agent_loop guards and screenshot hints",
+  "check": {
+    "kind": "pytest",
+    "target": "tests"
+  },
+  "arena": {
+    "branch": "auto",
+    "base_sha": "17efe3b412632372217cf6a6a0b5ab4828f67620"
+  }
+}
