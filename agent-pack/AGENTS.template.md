@@ -3,7 +3,7 @@
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep the work moving without burning CI.
 
-<!-- flutter-builder:agent-pack:start v1.18.0 -->
+<!-- flutter-builder:agent-pack:start v1.18.1 -->
 ## Captain task or independent work?
 
 **Captain A/B/C assignment:** attach this **app repo** in Arena Agent Mode,

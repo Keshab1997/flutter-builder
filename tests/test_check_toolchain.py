@@ -146,8 +146,11 @@ class WorkflowWiring(unittest.TestCase):
 
     def test_step_passes_root_dot(self):
         workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
-        self.assertIn("check_toolchain.py --root .", workflow,
-                      "the fetched checker needs --root . to see the project")
+        # The step is `python3 "$checker" --root .`: the flag must be there,
+        # on the line that runs the fetched script.
+        self.assertRegex(
+            workflow, r'python3 "\$checker" --root \.',
+            "the fetched checker needs --root . to see the project")
 
     def test_input_is_on_by_default(self):
         import yaml  # noqa: PLC0415 - optional dependency, only this test

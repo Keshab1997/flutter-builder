@@ -24,7 +24,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-agent-pack.sh"
 PACK = ROOT / "agent-pack"
-VERSION = "v1.18.0"
+VERSION = "v1.18.1"
 
 PUBSPEC = """name: demo_app
 version: 1.0.0+1
