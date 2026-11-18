@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Compute the next pubspec `version:` for a release.
 
-Used by the publish-release wrapper: it prints `name=…` lines for GITHUB_OUTPUT
-and exits non-zero with an actionable message when the current version cannot be
-bumped safely. Never rewrites the file — the caller does one focused commit via
-the GitHub API, so a bad regex can't mangle a pubspec.
+It prints `name=…`/`changed=…` lines for GITHUB_OUTPUT and exits non-zero with
+an actionable message when the current version cannot be bumped safely. It
+never rewrites the file and never auto-commits: bump in the pull request that
+precedes the release (see publish-release.yml) and commit through the GitHub
+API, so a bad regex can't mangle a pubspec.
 
 Accepts the Flutter form `MAJOR.MINOR.PATCH+BUILD` (the `+BUILD` is the Android
-versionCode and is required for `build`/`patch` bumps).
+versionCode and is required for `build`/`patch` bumps). On `major`, `minor` and
+`patch` bumps any prerelease suffix (e.g. `-beta.1`) is dropped; `build` and
+`none` keep it.
 """
 import argparse
 import os
@@ -48,8 +51,13 @@ def main() -> None:
     build = int(m["build"]) if m["build"] else None
     pre = m["pre"] or ""
 
+    current = f"{major}.{minor}.{patch}{pre}" + (f"+{build}" if build is not None else "")
+
     if args.bump == "none":
-        current = f"{major}.{minor}.{patch}{pre}" + (f"+{build}" if build is not None else "")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(f"name={current}\nchanged=false\n")
         print(f"name={current}")
         print(f"changed=false")
         print(f"reason=bump-type=none, publishing {current} as-is")
@@ -63,16 +71,19 @@ def main() -> None:
 
     if args.bump == "major":
         major, minor, patch = major + 1, 0, 0
+        pre = ""  # a numbered release drops any prerelease suffix
     elif args.bump == "minor":
         minor, patch = minor + 1, 0
+        pre = ""
     elif args.bump == "patch":
         patch += 1
+        pre = ""
 
     if build is not None:
         build += 1  # every bump advances versionCode; a release is never rebuilt
     new = f"{major}.{minor}.{patch}{pre}" + (f"+{build}" if build is not None else "")
 
-    if new == m.group(0).split(":", 1)[1].strip(" '\":\n"):
+    if new == current:
         sys.exit("computed version equals the current one — refusing to commit a no-op")
 
     out = os.environ.get("GITHUB_OUTPUT")
