@@ -178,6 +178,7 @@ def check(root: pathlib.Path) -> dict:
         dict(KNOWN_FLUTTER[flutter], source="built-in table")
         if flutter in KNOWN_FLUTTER else None)
 
+    require_table = bool(os.environ.get("REQUIRE_TOOLCHAIN_TABLE") == "true")
     problems: list[str] = []
     notes: list[str] = []
 
@@ -201,9 +202,16 @@ def check(root: pathlib.Path) -> dict:
     if gradle is None:
         problems.append("cannot read Gradle from the wrapper properties")
     if flutter and floor is None:
-        problems.append(
-            f"no constraint table for Flutter {flutter} — add it to "
-            "KNOWN_FLUTTER in scripts/check_toolchain.py")
+        message = (f"no constraint table for Flutter {flutter} — add it to "
+                   "KNOWN_FLUTTER in scripts/check_toolchain.py")
+        # A Flutter release newer than the table is a shared repo's ordinary
+        # Tuesday: failing it would redden every consumer at once. The floors
+        # simply were not checked, which is worth saying out loud — and is a
+        # failure only where `--require-table` (or REQUIRE_TOOLCHAIN_TABLE=true)
+        # says the pin under test is your own.
+        (problems if require_table else notes).append(
+            message if require_table
+            else f"{message}; the Android floors were not checked")
 
     if floor and agp and gradle:
         if V(agp) < V(floor["agp_min"]):
@@ -251,7 +259,13 @@ def main() -> int:
     parser.add_argument("--root", default=None,
                         help="project to check (default: $FLUTTER_BUILDER_ROOT "
                              "or this repo)")
+    parser.add_argument("--require-table", action="store_true",
+                        help="fail when the Flutter pin has no entry in the "
+                             "built-in table instead of just noting it (same "
+                             "as REQUIRE_TOOLCHAIN_TABLE=true)")
     args = parser.parse_args()
+    if args.require_table:
+        os.environ["REQUIRE_TOOLCHAIN_TABLE"] = "true"
 
     global ROOT
     if args.root:

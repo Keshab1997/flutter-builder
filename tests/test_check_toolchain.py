@@ -58,11 +58,11 @@ class ToolchainCheck(unittest.TestCase):
             WRAPPER % gradle)
         (self.root / ".fvmrc").write_text('{\n  "flutter": "%s"\n}\n' % flutter)
 
-    def run_check(self):
+    def run_check(self, *extra):
         env = dict(os.environ)
         env.pop("FLUTTER_ROOT", None)  # the built-in table, not a stray SDK
         out = subprocess.run([sys.executable, str(CHECKER), "--root", str(self.root),
-                              "--json"], capture_output=True, text=True, env=env)
+                              "--json", *extra], capture_output=True, text=True, env=env)
         return out.returncode, json.loads(out.stdout)
 
     def test_matching_toolchain_passes(self):
@@ -96,11 +96,24 @@ class ToolchainCheck(unittest.TestCase):
         self.assertEqual(code, 0, result["problems"])
         self.assertTrue(result["notes"])
 
-    def test_unknown_flutter_is_a_failure_not_a_pass(self):
+    def test_unknown_flutter_never_passes_silently(self):
+        # Default: never a pass, always a note that the floors went unchecked
+        # (the workflow's shape). --require-table: a failure (the app's shape).
         self.write(agp="9.3.1", gradle="9.5.0", kotlin="2.4.20", flutter="9.99.99")
         code, result = self.run_check()
+        self.assertEqual(code, 0)
+        self.assertIn("no constraint table", " ".join(result["notes"]))
+        code, result = self.run_check("--require-table")
         self.assertEqual(code, 1)
         self.assertIn("no constraint table", " ".join(result["problems"]))
+
+    def test_dev_channel_pin_is_a_note_not_a_failure(self):
+        # A pin flips to `master`/`beta` legitimately; the table can never know
+        # those floors, and a shared builder must not fail on the choice.
+        self.write(agp="9.3.1", gradle="9.5.0", kotlin="2.4.20", flutter="master")
+        code, result = self.run_check()
+        self.assertEqual(code, 0, result["problems"])
+        self.assertTrue(any("master" in n for n in result["notes"]))
 
     def test_missing_android_directory_is_reported(self):
         shutil.rmtree(self.root / "android")
@@ -169,11 +182,11 @@ class ConsumerShapes(unittest.TestCase):
         if pin is not None:
             (self.root / ".fvmrc").write_text(json.dumps({"flutter": pin}))
 
-    def run_check(self):
+    def run_check(self, *extra):
         env = dict(os.environ)
         env.pop("FLUTTER_ROOT", None)
         out = subprocess.run([sys.executable, str(CHECKER), "--root", str(self.root),
-                              "--json"], capture_output=True, text=True, env=env)
+                              "--json", *extra], capture_output=True, text=True, env=env)
         return out.returncode, json.loads(out.stdout)
 
     def test_groovy_settings_without_a_pin_passes(self):
@@ -205,6 +218,56 @@ class ConsumerShapes(unittest.TestCase):
         self.assertIn("below Flutter 3.50.0", result["problems"][0])
 
 
+class UnknownFlutterRelease(unittest.TestCase):
+    """A Flutter release the table has never heard of, which is what a shared
+    repo sees a few days after every Flutter patch.
+
+    Default: a note, because the floors were simply not checked and a shared
+    builder must not redden every consumer for a version nobody here chose.
+    --require-table: a failure, for the app that does choose its pin.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.root = pathlib.Path(self.dir)
+        (self.root / "android/gradle/wrapper").mkdir(parents=True)
+        (self.root / "android/settings.gradle.kts").write_text(
+            SETTINGS % ("9.3.1", "2.4.20"))
+        (self.root / "android/gradle/wrapper/gradle-wrapper.properties").write_text(
+            WRAPPER % "9.5.0")
+        (self.root / ".fvmrc").write_text(json.dumps({"flutter": "3.51.0"}))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def run_check(self, *extra, env_extra=None):
+        env = dict(os.environ)
+        env.pop("REQUIRE_TOOLCHAIN_TABLE", None)
+        env.update(env_extra or {})
+        return subprocess.run(
+            [sys.executable, str(CHECKER), "--json", "--root", self.dir, *extra],
+            capture_output=True, text=True, env=env)
+
+    def test_default_is_a_note(self):
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(any("3.51.0" in note for note in payload["notes"]))
+
+    def test_require_table_fails(self):
+        result = self.run_check("--require-table")
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertTrue(
+            any("3.51.0" in problem for problem in payload["problems"]))
+
+    def test_env_var_is_the_same_switch(self):
+        result = self.run_check(env_extra={"REQUIRE_TOOLCHAIN_TABLE": "true"})
+        self.assertEqual(result.returncode, 1)
+
+
 class WorkflowWiring(unittest.TestCase):
     """The checker is fetched into RUNNER_TEMP, so the step must point it at the
     project — the first release of this check failed its own consumers because
@@ -217,6 +280,11 @@ class WorkflowWiring(unittest.TestCase):
         self.assertRegex(
             workflow, r'python3 "\$checker" --root \.',
             "the fetched checker needs --root . to see the project")
+
+    def test_step_ships_the_strict_switch(self):
+        workflow = (REPO / ".github/workflows/flutter-build.yml").read_text()
+        self.assertIn("REQUIRE_TOOLCHAIN_TABLE", workflow)
+        self.assertIn("--require-table", workflow)
 
     def test_input_is_on_by_default(self):
         import yaml  # noqa: PLC0415 - optional dependency, only this test

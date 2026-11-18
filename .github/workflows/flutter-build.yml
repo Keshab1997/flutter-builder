@@ -196,6 +196,17 @@ on:
         required: false
         type: boolean
         default: true
+      require-toolchain-table:
+        description: >-
+          With check-toolchain on: also fail when the project's Flutter pin has
+          no entry in the checker's built-in table (a brand-new Flutter release
+          nobody taught the table about). Leave it off for shared repos — a
+          fresh patch release would then go red on every consumer at once. Turn
+          it on for your own app: the pin you actually build with stops being an
+          untested assumption.
+        required: false
+        type: boolean
+        default: false
       fail-on-placeholders:
         description: Fail when Google test ad unit IDs, com.example ids or debug signing are still in the release
         required: false
@@ -504,6 +515,8 @@ jobs:
       - name: Check Flutter pin against the Android toolchain
         if: inputs.check-toolchain
         working-directory: ${{ inputs.working-directory }}
+        env:
+          REQUIRE_TOOLCHAIN_TABLE: ${{ inputs.require-toolchain-table }}
         run: |
           set -uo pipefail
           checker="$RUNNER_TEMP/check_toolchain.py"
@@ -519,7 +532,14 @@ jobs:
           # --root . : the checker is fetched into RUNNER_TEMP, so without it
           # the script would inspect its own directory instead of the project.
           # working-directory above is the caller's app directory.
-          python3 "$checker" --root .
+          # Off by default: a Flutter release newer than the table is a note,
+          # not a broken build. Consumers that want the strict reading set
+          # require-toolchain-table: true.
+          if [ "${REQUIRE_TOOLCHAIN_TABLE:-false}" = "true" ]; then
+            python3 "$checker" --root . --require-table
+          else
+            python3 "$checker" --root . || exit 1
+          fi
 
       - name: Install dependencies
         run: flutter pub get
@@ -925,7 +945,7 @@ jobs:
         with:
           repository: Keshab1997/flutter-builder
           # Must carry the same tag as this file: doctor.sh ships with it.
-          ref: v1.18.2
+          ref: v1.18.3
           path: .flutter-builder
 
       - name: Pre-flight doctor
