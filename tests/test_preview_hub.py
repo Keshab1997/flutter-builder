@@ -24,9 +24,14 @@ Text-level assertions; no network, no Flutter SDK.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
+import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +155,211 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("github.rest.pulls.list", self.text)
         self.assertIn('head: `${context.repo.owner}:${process.env.BRANCH_NAME}`',
                       self.text)
+
+
+class HubStub:
+    """A loopback stand-in for the two Contents endpoints the hub uses.
+
+    The script's network seam is GITHUB_API_URL (default
+    https://api.github.com), so pointing it at 127.0.0.1 exercises the real
+    code path: listing the preview directory, reading the index sha, PUT-ing
+    the index - including the 409 retry.
+    """
+
+    def __init__(self) -> None:
+        self.directories: dict[str, set[str]] = {}
+        self.files: dict[str, tuple[str, str, str]] = {}  # path -> (sha, b64, message)
+        self.put_count = 0
+        self.put_failures_left = 0
+        self.queries_seen: list[str] = []
+        self._server: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        stub = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args: object) -> None:  # keep the log quiet
+                pass
+
+            def _send(self, status: int, body: bytes) -> None:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _contents_path(self) -> str:
+                path, _, query = self.path.partition("?")
+                stub.queries_seen.append(query)
+                parts = path.split("/")
+                assert len(parts) >= 6 and parts[1] == "repos", self.path
+                return "/".join(parts[5:])
+
+            def do_GET(self) -> None:
+                contents_path = self._contents_path()
+                if contents_path in stub.directories:
+                    body = json.dumps([
+                        {"name": n, "type": "dir"}
+                        for n in sorted(stub.directories[contents_path])
+                    ]).encode()
+                    self._send(200, body)
+                elif contents_path in stub.files:
+                    sha, b64, message = stub.files[contents_path]
+                    self._send(200, json.dumps(
+                        {"sha": sha, "content": b64, "message": message}).encode())
+                else:
+                    self._send(404, b'{"message": "Not Found"}')
+
+            def do_PUT(self) -> None:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode() or "{}")
+                contents_path = self._contents_path()
+                if stub.put_failures_left > 0:
+                    stub.put_failures_left -= 1
+                    self._send(409, b'{"message": "sha mismatch (stale write)"}')
+                    return
+                stub.put_count += 1
+                sha = f"stub-sha-{stub.put_count:04d}"
+                stub.files[contents_path] = (
+                    sha, payload.get("content", ""), payload.get("message", ""))
+                self._send(201, json.dumps({"content": {"sha": sha}}).encode())
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+
+    @property
+    def base_url(self) -> str:
+        assert self._server is not None
+        return f"http://127.0.0.1:{self._server.server_address[1]}"
+
+    def seed(self, preview_dir: str, *names: str) -> None:
+        self.directories[preview_dir] = set(names)
+
+    def index(self, preview_dir: str) -> tuple[str, str, str] | None:
+        return self.files.get(f"{preview_dir}/index.html")
+
+    def index_page(self, preview_dir: str) -> str:
+        import base64
+        stored = self.files.get(f"{preview_dir}/index.html")
+        assert stored is not None, "the hub never wrote the index"
+        return base64.b64decode(stored[1]).decode()
+
+
+class HubBehaviourTests(unittest.TestCase):
+    """Behavioural checks against the loopback Contents API stub."""
+
+    HUB = ROOT / "scripts" / "preview-hub.sh"
+
+    def setUp(self) -> None:
+        self.stub = HubStub()
+        self.stub.start()
+        self.addCleanup(self.stub.stop)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.summary_file = str(Path(self.temp.name) / "summary.md")
+
+    def run_hub(self, *args: str, pages_branch: str = "gh-pages") -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ)
+        env.update({
+            "GITHUB_TOKEN": "test-token",
+            "GITHUB_REPOSITORY": "acme/demo",
+            "PAGES_BRANCH": pages_branch,
+            "GITHUB_API_URL": self.stub.base_url,
+            "GITHUB_STEP_SUMMARY": self.summary_file,
+        })
+        return subprocess.run(
+            ["bash", str(self.HUB), *args],
+            capture_output=True, text=True, check=False, env=env, timeout=120)
+
+    def test_deploy_indexes_the_listing_and_inserts_the_deployed_label(self) -> None:
+        """The API may lag a deploy by a beat: the label is inserted first."""
+        self.stub.seed("preview", "feature-x")
+        result = self.run_hub("--branch-dir", "preview/new-branch")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.stub.put_count, 1)
+        page = self.stub.index_page("preview")
+        self.assertIn('<a href="./new-branch/">new-branch</a>', page)
+        self.assertIn('<a href="./feature-x/">feature-x</a>', page)
+        # The deployed branch is listed first, before the sorted API listing.
+        list_block = page.split("<ul", 1)[1].split("</ul>", 1)[0]
+        self.assertLess(list_block.index("new-branch"), list_block.index("feature-x"))
+        self.assertIn("Latest: <strong>new-branch</strong>", page)
+        _, _, message = self.stub.files["preview/index.html"]
+        self.assertIn("new-branch", message)
+        # The hub URL still lands in the step summary.
+        self.assertIn("All previews of this repository:",
+                      Path(self.summary_file).read_text(encoding="utf-8"))
+
+    def test_remove_drops_a_stale_deleted_slug_and_inserts_no_label(self) -> None:
+        self.stub.seed("preview", "main", "gone")
+        result = self.run_hub("--preview-dir", "preview", "--remove", "gone")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.stub.put_count, 1)
+        page = self.stub.index_page("preview")
+        self.assertIn('<a href="./main/">main</a>', page)
+        self.assertNotIn("gone", page)
+        self.assertNotIn("Latest:", page)
+        self.assertIn("1 branch preview(s): main", result.stdout)
+        _, _, message = self.stub.files["preview/index.html"]
+        self.assertIn("removed gone", message)
+
+    def test_refresh_with_zero_previews_writes_an_empty_state(self) -> None:
+        self.stub.seed("preview")  # empty listing
+        result = self.run_hub("--preview-dir", "preview", "--refresh")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.stub.put_count, 1,
+                         "an empty listing must still write the page")
+        page = self.stub.index_page("preview")
+        self.assertIn("No active branch previews.", page)
+        self.assertNotIn("Latest:", page)
+        self.assertNotIn('<a href="./', page)
+        self.assertIn("0 branch preview(s)", result.stdout)
+
+    def test_http_409_on_put_is_retried(self) -> None:
+        self.stub.seed("preview", "main")
+        self.stub.put_failures_left = 1
+        result = self.run_hub("--branch-dir", "preview/main")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("attempt 1 got HTTP 409", result.stdout)
+        self.assertEqual(self.stub.put_count, 1)
+        self.assertIn('<a href="./main/">main</a>', self.stub.index_page("preview"))
+
+    def test_html_and_url_special_characters_are_escaped(self) -> None:
+        self.stub.seed("preview", "a<b>&c")
+        result = self.run_hub("--preview-dir", "preview", "--refresh")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        page = self.stub.index_page("preview")
+        self.assertIn('href="./a%3Cb%3E%26c/"', page)
+        self.assertIn("a&lt;b&gt;&amp;c", page)
+        # The Pages branch is a query value, so it must be percent-encoded.
+        self.assertEqual(
+            self.run_hub("--preview-dir", "preview", "--refresh",
+                         pages_branch="pages/1.0").returncode, 0)
+        self.assertTrue(
+            any("ref=pages%2F1.0" in query for query in self.stub.queries_seen),
+            f"pages_branch was not URL-encoded in ?ref= (seen: {self.stub.queries_seen})")
+
+    def test_empty_dot_or_dotdot_segments_are_rejected(self) -> None:
+        for args in (
+            ("--preview-dir", ".."),
+            ("--preview-dir", "."),
+            ("--preview-dir", "a/../b"),
+            ("--preview-dir", "a/./b"),
+            ("--preview-dir", "a//b"),
+            ("--branch-dir", "../x"),
+        ):
+            with self.subTest(args=args):
+                result = self.run_hub(*args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("must not contain", result.stderr)
+        self.assertEqual(self.stub.put_count, 0, "a rejected run must not write")
 
 
 if __name__ == "__main__":

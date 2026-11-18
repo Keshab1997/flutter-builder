@@ -68,13 +68,23 @@ git_auth() { git -c "http.extraheader=$auth_header" "$@"; }
 
 # One directory per branch so two open pull requests never fight over a file.
 ref_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-branch}}"
-target="$(printf '%s' "$ref_name" | tr '[:upper:]' '[:lower:]' \
-  | sed -e 's#[^a-z0-9._-]\+#-#g' -e 's#^-\{1,\}##' -e 's#-\{1,\}$##')"
+# LC_ALL=C keeps tr/sed byte-based: in a UTF-8 locale the character classes
+# can turn multi-byte characters into unpredictable slugs. -E with plain + is
+# used because \+ and \{n,\} are GNU-only in basic sed (BSD sed rejects them).
+target="$(printf '%s' "$ref_name" | LC_ALL=C tr '[:upper:]' '[:lower:]' \
+  | LC_ALL=C sed -E -e 's#[^a-z0-9._-]+#-#g' -e 's#^-+##' -e 's#-+$##')"
+# An empty, "." or ".." slug would let mkdir and rm act on the workdir itself
+# or escape it; pin such names to a fixed, safe directory instead.
+case "$target" in
+  ""|.|..) target="branch" ;;
+esac
 short_sha="$(printf '%s' "${GITHUB_SHA:-manual}" | cut -c1-7)"
-remote="https://github.com/${GITHUB_REPOSITORY}.git"
+# Overridable for offline tests; production keeps the default.
+remote="${SCREENSHOTS_REMOTE:-https://github.com/${GITHUB_REPOSITORY}.git}"
 
 workdir="$(mktemp -d)"
-cleanup() { rm -rf -- "$workdir"; }
+comment_file=""
+cleanup() { rm -rf -- "$workdir"; [ -n "$comment_file" ] && rm -f -- "$comment_file" || true; }
 trap cleanup EXIT
 
 if git_auth clone --quiet --depth 1 --branch "$BRANCH" "$remote" "$workdir" 2>/dev/null; then
@@ -117,8 +127,10 @@ comment_file="$(mktemp)"
   printf '| screen | viewport | size | image |\n|---|---|---|---|\n'
   while IFS=$'\t' read -r name route viewport size _colors _share; do
     [ -n "$name" ] || continue
+    # A route containing a pipe would break the Markdown table, so escape it.
+    route_cell="${route//|/\\|}"
     printf '| `%s` | %s | %s KB | <img src="https://raw.githubusercontent.com/%s/%s/%s/%s.png" width="%s" alt="%s"> |\n' \
-      "$route" "$viewport" "$((size / 1024))" "$GITHUB_REPOSITORY" "$BRANCH" "$target" \
+      "$route_cell" "$viewport" "$((size / 1024))" "$GITHUB_REPOSITORY" "$BRANCH" "$target" \
       "$name" "$IMAGE_WIDTH" "$name"
   done < "$SRC/manifest.tsv"
   printf '\n_Static capture of the web build; animations and platform plugins are not represented._\n'

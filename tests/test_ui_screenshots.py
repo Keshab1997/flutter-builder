@@ -20,6 +20,7 @@ Text-level assertions, no Flutter SDK, no browser, no network.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -475,6 +476,124 @@ class SmokeWorkflowTriggerTests(unittest.TestCase):
         text = SMOKE.read_text(encoding="utf-8")
         referenced = self.referenced_files(self.screenshot_job(text))
         self.assertIn("scripts/capture-pages.cjs", referenced)
+
+
+class EmbedScreenshotsBehaviourTests(unittest.TestCase):
+    """embed-screenshots.sh run end to end against a local bare repository.
+
+    SCREENSHOTS_REMOTE points the clone/push at a bare clone on disk, so the
+    slug handling, the per-branch directory layout and the Markdown rendering
+    are exercised offline: no network, no GitHub, no Flutter SDK.
+    """
+
+    EMBED = ROOT / "scripts" / "embed-screenshots.sh"
+    # A minimal valid 1x1 RGBA PNG.
+    PNG = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c626001000000ffff03000006000557bfabd40000000049"
+        "454e44ae426082")
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.bare = self.root / "bare.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.bare)], check=True)
+        # Seed the screenshots branch so the script takes the clone path (the
+        # path every run after the first takes), not the orphan-init path.
+        seed = self.root / "seed"
+        seed.mkdir()
+        subprocess.run(
+            ["git", "init", "-q", "-b", "ui-screenshots", str(seed)], check=True)
+        (seed / "README.md").write_text("seed\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(seed), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", str(seed), "-c", "user.email=t@t.invalid",
+             "-c", "user.name=t", "commit", "-q", "-m", "seed"], check=True)
+        subprocess.run(
+            ["git", "-C", str(seed), "push", "-q", str(self.bare),
+             "ui-screenshots"], check=True)
+
+    def make_src(self, route: str = "/") -> Path:
+        src = self.root / "shot"
+        src.mkdir(exist_ok=True)
+        (src / "home-390x844.png").write_bytes(self.PNG)
+        (src / "manifest.tsv").write_text(
+            f"home-390x844\t{route}\t390x844\t67739\t1491\t0.867\n",
+            encoding="utf-8")
+        return src
+
+    def run_embed(
+        self, ref: str, route: str = "/",
+        comment_out: Path | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        src = self.make_src(route)
+        args = ["bash", str(self.EMBED), "--src", str(src),
+                "--branch", "ui-screenshots"]
+        if comment_out is not None:
+            args += ["--comment-out", str(comment_out)]
+        env = dict(os.environ)
+        env.update({
+            "GITHUB_TOKEN": "test-token",
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_HEAD_REF": ref,
+            "GITHUB_SHA": "abcdef1234567890",
+            "SCREENSHOTS_REMOTE": str(self.bare),
+        })
+        env.pop("GITHUB_EVENT_PATH", None)
+        env.pop("GITHUB_REF_NAME", None)
+        if extra_env:
+            env.update(extra_env)
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, env=env,
+            cwd=str(self.root), timeout=120)
+
+    def branch_tree(self) -> list[str]:
+        result = subprocess.run(
+            ["git", "-C", str(self.bare), "ls-tree", "-r", "--name-only",
+             "refs/heads/ui-screenshots"],
+            capture_output=True, text=True, check=True)
+        return [line for line in result.stdout.splitlines() if line]
+
+    def test_dotdot_branch_name_cannot_escape_the_workdir(self) -> None:
+        """A ref that slugs to `..` must land in a fixed, safe directory."""
+        result = self.run_embed("..")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("pushed 1 image(s) to ui-screenshots/branch", result.stdout)
+        self.assertEqual(sorted(self.branch_tree()),
+                         ["README.md", "branch/home-390x844.png"])
+
+    def test_punctuation_branch_name_is_slugged_to_safe_characters(self) -> None:
+        # "/" and "??" collapse to single dashes; the branch's own literal
+        # "--" is a valid slug character and survives (same as before).
+        result = self.run_embed("Feature/Release--0.1??x")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        tree = self.branch_tree()
+        self.assertIn("feature-release--0.1-x/home-390x844.png", tree)
+        for entry in tree:
+            if entry != "README.md":
+                self.assertRegex(entry.split("/", 1)[0], r"^[a-z0-9._-]+$")
+
+    def test_unicode_branch_name_gets_a_byte_stable_slug(self) -> None:
+        """LC_ALL=C inside the script: multi-byte characters collapse to a
+        single dash regardless of the caller's locale."""
+        result = self.run_embed("Über/Case",
+                                extra_env={"LC_ALL": "en_US.UTF-8",
+                                           "LANG": "en_US.UTF-8"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ber-case/home-390x844.png", self.branch_tree())
+
+    def test_pipe_in_route_is_escaped_in_the_comment_markdown(self) -> None:
+        comment_out = self.root / "comment.md"
+        result = self.run_embed("main", route="/a|b", comment_out=comment_out)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        content = comment_out.read_text(encoding="utf-8")
+        self.assertIn("<!-- flutter-builder-ui-screenshots -->", content)
+        self.assertIn("`/a\\|b`", content)
+        self.assertNotIn("| `/a|b` |", content)
+        self.assertIn("Built from `abcdef1`", content)
+        self.assertIn("| screen | viewport | size | image |", content)
 
 
 if __name__ == "__main__":
