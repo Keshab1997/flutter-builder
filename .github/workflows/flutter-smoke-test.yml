@@ -1,7 +1,7 @@
 name: Flutter smoke test
 
 # Exercises the toolchain that flutter-build.yml depends on (Flutter SDK,
-# Java 17, Gradle/AGP) against a freshly generated Flutter app. The installer
+# Java 21, Gradle/AGP) against a freshly generated Flutter app. The installer
 # tests only cover scripts/install.sh; nothing else in this repository runs a
 # real Flutter build, so an upstream change (new Flutter stable, new AGP
 # default, broken Gradle cache) would first surface as a failure inside a

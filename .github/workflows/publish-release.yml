@@ -13,7 +13,7 @@ name: Reusable Signed Android Release Publisher
 #     contents: write
 #   jobs:
 #     publish:
-#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.18.6
+#       uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.18.7
 #       with:
 #         app-name: SpeakEasy   # optional: empty = the app's android:label,
 #                               # else the pubspec name
@@ -68,10 +68,13 @@ on:
         type: string
         default: stable
       java-version:
-        description: Java version used for the Android build
+        description: >-
+          Java version used for the Android build. JDK 21 is the default
+          because AGP >= 9.2 lints plugin sources and the lint driver crashes
+          on JDK 17 (NoSuchMethodError: JavaDocParser.parseDataItem).
         required: false
         type: string
-        default: "17"
+        default: "21"
       working-directory:
         description: Flutter project directory inside the caller repository
         required: false
@@ -266,7 +269,7 @@ jobs:
     # MUST stay in step with the tag this file is published under. The
     # google-services.json injection only exists from v1.6.0 onwards, so an
     # older ref here silently releases an offline-only app.
-    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.6
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.7
     with:
       flutter-channel: ${{ inputs.flutter-channel }}
       java-version: ${{ inputs.java-version }}
