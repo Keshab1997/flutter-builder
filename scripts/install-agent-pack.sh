@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the flutter-builder agent pack into an existing Flutter repository.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.7/scripts/install-agent-pack.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.8/scripts/install-agent-pack.sh | bash
 #
 # What it installs (repository root, never touches anything else):
 #   tool/preflight.py    Dart checks that need no Flutter SDK: dead code,
@@ -39,7 +39,7 @@
 # curl | bash. It never adds GitHub secrets and never runs git.
 set -euo pipefail
 
-PACK_VERSION=v1.18.7
+PACK_VERSION=v1.18.8
 REPO=Keshab1997/flutter-builder
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/${PACK_VERSION}"
 
@@ -54,7 +54,7 @@ tool/screenshots/ harness and a managed AGENTS.md block) into a Flutter
 repository. No Flutter SDK needed to install.
 
 Run from anywhere inside the repository:
-  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.7/scripts/install-agent-pack.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.8/scripts/install-agent-pack.sh | bash
 
 Options when running a downloaded/local script:
   --dry-run   Show what would change without writing anything
@@ -1832,7 +1832,7 @@ cat > "$stage/agents-template.md" <<'AGENT_PACK_AGENTS_MD_EOF'
 Playbook for AI agents working in this repository. Read it once at the start of
 a session: everything here exists to keep the work moving without burning CI.
 
-<!-- flutter-builder:agent-pack:start v1.18.7 -->
+<!-- flutter-builder:agent-pack:start v1.18.8 -->
 ## Captain task or independent work?
 
 **Captain A/B/C assignment:** attach this **app repo** in Arena Agent Mode,
@@ -1855,11 +1855,14 @@ use a separate clone or new pairing.
 The direct-to-`main` and one-command push examples below are only for
 **independent work explicitly authorized to push to `main`**.
 
-## Rule #1 — CI is manual; preflight is your check
+## Rule #1 — CI is one dispatch per batch; preflight is your check
 
-This repository runs CI **only when the human dispatches it** (Actions → *Flutter
-CI* → Run workflow). A push can still start configured previews or checks,
-but it does not queue this manual CI. So:
+This repository's CI is **manual** — a push never queues it (a push can still
+start configured previews or checks). Since 2026-11-20 Keshab approves agents
+dispatching it themselves once a batch is ready:
+`python3 /home/user/agent-bootstrap/captain/ci_dispatch.py <owner>/<repo> --watch 900`
+(button fallback: Actions → *Flutter CI* → Run workflow). Captain **workers**
+never dispatch — they checkpoint their `arena/*` branch and report. So:
 
 > **Name things as the project actually has them.** The workflow names in this
 > file are the pack's defaults; a project may hand-roll its gates instead of
@@ -1869,8 +1872,8 @@ but it does not queue this manual CI. So:
 
 - For explicitly authorized independent work, push directly to `main`. A
   Captain worker only checkpoints its `arena/*` branch as above.
-- Do **not** wait for manual CI after pushing. The human dispatches it when
-  ready.
+- Do **not** wait for CI mid-batch. Keep working; dispatch once, when the
+  batch is ready (command above), and say *"batch ready"* in the report.
 - `tool/preflight.py` is your only automatic check. Run it before every push —
   it is seconds, not minutes, and catches the mistakes that would otherwise
   surface in the next manual CI run.
@@ -1944,11 +1947,12 @@ change:
 3. **Commit and push to `main`.** `python3 tool/agent_loop.py -m "…"` does
    preflight, the secret guard, the commit and the push in one call. Repeat for
    each small change; every commit goes straight to `main`.
-4. **Do not wait for manual CI.** Keep working.
-5. **When the batch is ready, tell the human** to run CI once (Actions → *Flutter
-   CI* → Run workflow). If a run is already in flight, `python3 tool/ci_watch.py`
-   prints the conclusion of every workflow plus the interesting lines of the
-   failed ones.
+4. **Do not wait for CI mid-batch.** Keep working.
+5. **When the batch is ready, say *"batch ready"* and dispatch CI once** —
+   `python3 /home/user/agent-bootstrap/captain/ci_dispatch.py <owner>/<repo> --watch 900`,
+   or the button: Actions → *Flutter CI* → Run workflow. If a run is already
+   in flight, `python3 tool/ci_watch.py` prints the conclusion of every
+   workflow plus the interesting lines of the failed ones.
 
 Rules of thumb: a CI run per push wastes the most time; push freely, run CI once
 per batch. When a red run does arrive, read the log before editing — guessing at
@@ -2064,7 +2068,7 @@ workflow matches it, run the local pair once (`flutter analyze` + the relevant
 `flutter test`) — that is the only check that diff will ever get.
 
 If you want a run right now, do **not** retrigger it with an empty commit — use
-*Actions → Run workflow* (or ask the human to).
+*Actions → Run workflow* (or the `ci_dispatch.py` one-liner from Rule #1).
 
 ## CI map
 

@@ -29,7 +29,7 @@ This file is not it.
 ## Independent work: the staging loop
 
 This repo ships reusable GitHub Actions workflows and an agent pack. Projects
-consume them **by tag** (`@v1.18.7`), so **`main` is staging**, not a release.
+consume them **by tag** (`@v1.18.8`), so **`main` is staging**, not a release.
 The Captain owns integration for Captain assignments.
 
 ```bash
@@ -136,7 +136,7 @@ python3 scripts/sync-agent-pack.py --check    # exit 1 when out of sync (CI-safe
 
 | | |
 |---|---|
-| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.7` and `install.sh --ref v1.18.7` |
+| Consumers pin | `uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.8` and `install.sh --ref v1.18.8` |
 | `main` | staging — Captain integration or expressly authorized independent pushes |
 | A tag | publishes a new version and starts consumer pin-bump PRs |
 
@@ -222,7 +222,7 @@ Claude ইত্যাদি সবই এটা খোঁজে)।
 - **Captain-এর কাজ হলে** Arena-তে `flutter-builder` attach করে GitHub brief
   পড়ুন; worker push করবে শুধু `arena/*` branch-এ। আলাদা অনুমোদিত কাজেই
   সরাসরি `main`-এ push। **CI ম্যানুয়াল** — push করে অপেক্ষা নয়।
-- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.18.7` pin করে),
+- **tag = release** — `main`-এ push নিরাপদ (consumer-রা `@v1.18.8` pin করে),
   কিন্তু নতুন tag দিলে connected project-এ bump pull request যায়
   (`bump-consumers.yml`)। PR merge না হওয়া পর্যন্ত আগের pin বদলাবে না; tag
   আপনার সিদ্ধান্ত।
