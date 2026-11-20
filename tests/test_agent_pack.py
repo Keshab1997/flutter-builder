@@ -24,7 +24,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install-agent-pack.sh"
 PACK = ROOT / "agent-pack"
-VERSION = "v1.18.8"
+VERSION = "v1.18.9"
 
 PUBSPEC = """name: demo_app
 version: 1.0.0+1
@@ -555,6 +555,47 @@ class PreflightToolTests(unittest.TestCase):
         ))
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("optional parameter 'footer' of _Tile is never passed", result.stdout)
+
+    def test_ignore_directive_suppresses_the_finding(self) -> None:
+        """Generated l10n opens with `// ignore: unused_import`; the analyzer
+        honours it, so the checker must not report what CI would not."""
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            // ignore: unused_import
+            import 'package:intl/intl.dart' as intl;
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("0 issue(s)", result.stdout)
+
+    def test_ignore_for_file_type_lint_skips_generated_files(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            // ignore_for_file: type=lint
+            import 'package:intl/intl.dart' as intl;
+
+            class _NeverUsed extends StatelessWidget {
+              const _NeverUsed();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("0 issue(s)", result.stdout)
+
+    def test_unrelated_ignore_does_not_hide_other_rules(self) -> None:
+        result = self.run_preflight(textwrap.dedent(
+            """\
+            // ignore: unused_import
+            import 'package:intl/intl.dart' as intl;
+
+            class _NeverUsed extends StatelessWidget {
+              const _NeverUsed();
+            }
+            """
+        ))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("private class _NeverUsed is never used", result.stdout)
+        self.assertNotIn("unused_import", result.stdout)
 
     def test_removed_private_widget_is_reported(self) -> None:
         result = self.run_preflight(textwrap.dedent(

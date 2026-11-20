@@ -25,7 +25,9 @@ most small pushes red:
 
 It is intentionally heuristic: it reads the file as text, blanks comments and
 string literals, and never executes Dart. It will not catch type errors,
-lints, or anything in generated code. It is a pre-push smoke check, not a
+lints, or anything in generated code, and it honours the file's own
+`// ignore:` / `// ignore_for_file:` directives so it never reports what
+`flutter analyze` would suppress. It is a pre-push smoke check, not a
 replacement for CI - CI remains the single source of truth.
 
 Usage:
@@ -74,7 +76,10 @@ FUNCTION_RE = re.compile(
 # Foo is not referenced locally, and flagging it would be a false positive.
 # Cross-file resolution still uses IMPORT_OR_EXPORT_RE below, which keeps both.
 IMPORT_RE = re.compile(
-    r"(?m)^\s*import\s+[\"'](?P<uri>[^\"']+)[\"'](?P<tail>[^;]*);")
+    # `[ \t]*`, not `\s*`: with MULTILINE, `\s*` also eats the newline of a
+    # preceding blank or commented line, so `im.start()` - and the reported
+    # line number - landed one line above the import itself.
+    r"(?m)^[ \t]*import\s+[\"'](?P<uri>[^\"']+)[\"'](?P<tail>[^;]*);")
 
 # Comments only; `blanked()` also removes string literals and is therefore
 # unusable for import scanning. See without_comments().
@@ -98,6 +103,53 @@ def without_comments(src: str) -> str:
     """
     return COMMENT_ONLY.sub(
         lambda m: re.sub(r"[^\n]", " ", m.group(0)), src)
+
+
+IGNORE_FOR_FILE = re.compile(r"//\s*ignore_for_file:\s*([^\n]*)")
+IGNORE_LINE = re.compile(r"//\s*ignore:\s*([^\n]*)")
+PROBLEM_RULE = re.compile(r"\(([A-Za-z_][\w-]*)\)\s*$")
+PROBLEM_LINE = re.compile(r"^.*?:(\d+):")
+
+
+def ignore_rules(raw: str) -> tuple[set[str], dict[int, set[str]]]:
+    """Dart's ignore directives as (file-wide rules, {line: rules}).
+
+    The analyzer honours `// ignore:` and `// ignore_for_file:`, and generated
+    files (`flutter gen-l10n`, build_runner) ship with them - a generated
+    `app_localizations_bn.dart` opens with `// ignore: unused_import` and ends
+    with `// ignore_for_file: type=lint`. A heuristic that reports what the
+    analyzer suppresses makes the pre-push gate lie, so the directives are
+    parsed from the raw source here: `blanked()` and `without_comments()` both
+    erase them.
+    """
+    file_rules: set[str] = set()
+    line_rules: dict[int, set[str]] = {}
+    for number, line in enumerate(raw.splitlines(), start=1):
+        for match in IGNORE_FOR_FILE.finditer(line):
+            file_rules.update(name.strip() for name in match.group(1).split(",") if name.strip())
+        for match in IGNORE_LINE.finditer(line):
+            names = {name.strip() for name in match.group(1).split(",") if name.strip()}
+            # A directive alone on its line covers the next line; a trailing
+            # one covers the line it sits on.
+            target = number if line.split("//", 1)[0].strip() else number + 1
+            line_rules.setdefault(target, set()).update(names)
+    return file_rules, line_rules
+
+
+def keep_unignored(problems: list[str], raw: str) -> list[str]:
+    """Drop the findings the file's own ignore directives already suppress."""
+    file_rules, line_rules = ignore_rules(raw)
+    if "type=lint" in file_rules:
+        return []  # generated file: the analyzer lints nothing in it
+    kept: list[str] = []
+    for problem in problems:
+        rule = PROBLEM_RULE.search(problem)
+        line = PROBLEM_LINE.match(problem)
+        if rule and (rule.group(1) in file_rules
+                     or rule.group(1) in line_rules.get(int(line.group(1)) if line else 0, ())):
+            continue
+        kept.append(problem)
+    return kept
 
 
 def line_of(text: str, index: int) -> int:
@@ -416,8 +468,8 @@ def package_name(cwd: pathlib.Path) -> str | None:
     return None
 
 
-def check_file(path: pathlib.Path) -> list[str]:
-    raw = path.read_text(errors="replace")
+def check_file(path: pathlib.Path, raw: str | None = None) -> list[str]:
+    raw = path.read_text(errors="replace") if raw is None else raw
     text = blanked(raw)
     code = without_comments(raw)
     return (check_private_classes(path, text)
@@ -443,15 +495,19 @@ def main(argv: list[str]) -> int:
     problems: list[str] = []
     decl_texts: dict[pathlib.Path, str] = {}
     code_texts: dict[pathlib.Path, str] = {}
+    raws: dict[pathlib.Path, str] = {}
     for f in files:
-        problems += check_file(f)
         raw = f.read_text(errors="replace")
+        raws[f] = raw
+        problems += keep_unignored(check_file(f, raw), raw)
         decl_texts[f] = blanked(raw)
         code_texts[f] = without_comments(raw)
     if len(files) > 1:
-        problems += check_cross_file(files, decl_texts, code_texts,
-                                     package_name(pathlib.Path.cwd()),
-                                     pathlib.Path.cwd())
+        for problem in check_cross_file(files, decl_texts, code_texts,
+                                        package_name(pathlib.Path.cwd()),
+                                        pathlib.Path.cwd()):
+            raw = next((raws[p] for p in files if problem.startswith(f"{p}:")), "")
+            problems += keep_unignored([problem], raw)
     for line in problems:
         print(line)
     print(f"\npreflight: {len(files)} file(s) checked, {len(problems)} issue(s)")

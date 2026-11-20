@@ -251,7 +251,7 @@ class ImgBbWorkflowSecretTests(unittest.TestCase):
         publish = self.PUBLISH.read_text(encoding="utf-8")
         self.assertIn("      IMGBB_API_KEY:", publish)
         self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", publish)
-        self.assertIn("flutter-build.yml@v1.18.8", publish)
+        self.assertIn("flutter-build.yml@v1.18.9", publish)
         manual = self.MANUAL_EXAMPLE.read_text(encoding="utf-8")
         self.assertIn("IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}", manual)
 

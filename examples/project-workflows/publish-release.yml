@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.18.8
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.18.9
     with:
       # app-name: SpeakEasy   # optional override; default: the app's
       #                        # android:label, else the pubspec name
