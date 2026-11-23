@@ -215,6 +215,16 @@ class PlayNotesTests(unittest.TestCase):
             check=False,
         )
 
+    def test_notes_check_runs_from_workspace_like_upload_action(self) -> None:
+        body = step(BUILD.read_text(encoding="utf-8"), NOTES_STEP)
+        self.assertIn("working-directory: ${{ github.workspace }}", body)
+        (self.root / "flutter_app").mkdir()
+        notes = self.root / "distribution/whatsnew"
+        notes.mkdir(parents=True)
+        (notes / "whatsnew-en-US").write_text("Release fixes\n", encoding="utf-8")
+        result = self.check("flutter_app/../distribution/whatsnew")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_a_missing_directory_fails_with_the_subdirectory_hint(self) -> None:
         (self.root / "distribution/whatsnew").mkdir(parents=True)
         result = self.check("flutter_app/distribution/whatsnew")

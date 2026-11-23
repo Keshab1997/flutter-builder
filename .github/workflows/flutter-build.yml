@@ -1350,6 +1350,9 @@ jobs:
           fi
 
       - name: Check the Play release-notes directory
+        # NOTES_DIR already includes the app path, just like the upload action.
+        # Override defaults.run so subdirectory apps are not prefixed twice.
+        working-directory: ${{ github.workspace }}
         if: inputs.play-track != '' && inputs.build-aab && inputs.play-whats-new-directory != ''
         env:
           # Exactly the path the upload step hands to the action, so this check
