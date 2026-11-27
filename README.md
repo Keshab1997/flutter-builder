@@ -180,6 +180,10 @@ Shared drop-in Dart packages built for apps using `flutter-builder` — add via 
 | [`local_vault_backup`](https://github.com/Keshab1997/local_vault_backup) | Offline-first encrypted JSON backup, SHA-256 verification, schema migrations & EN/বাংলা UI. / অফলাইন অ্যাপের এনক্রিপ্টেড ব্যাকআপ ও রিস্টোর। |
 | [`pulse-control-panel`](https://github.com/Keshab1997/pulse-control-panel) | Single static Web UI to manage `pulse.json` across all apps (updates, maintenance, notices, flags). / এক স্ক্রিন থেকে সব অ্যাপের `pulse.json` কন্ট্রোল প্যানেল। |
 | [`smart_ad_kit`](https://github.com/Keshab1997/smart_ad_kit) | Drop-in AdMob monetization kit (auto debug test IDs, interstitial capping, adaptive banners, EN/বাংলা rewarded prompts & remote kill-switch). / নিরাপদ AdMob মনিটাইজেশন কিট। |
+| [`smart_notify_kit`](https://github.com/Keshab1997/smart_notify_kit) | Local reminders, daily streak nudges & deadline alerts with Quiet Hours & EN/বাংলা UI. / দৈনিক রিমাইন্ডার ও ডেডলাইন অ্যালার্ট। |
+| [`smart_share_card`](https://github.com/Keshab1997/smart_share_card) | Zero-dependency branded PNG share cards (Score, Job Alert, Summary, Streak) for WhatsApp/Status. / হোয়াটসঅ্যাপ শেয়ার কার্ড। |
+| [`smart_onboarding_kit`](https://github.com/Keshab1997/smart_onboarding_kit) | 1st-launch EN/বাংলা onboarding walkthrough + version-aware "What's New" sheet. / অনবোর্ডিং ও হোয়াটস নিউ শিট। |
+| [`store_launch_kit`](https://github.com/Keshab1997/store_launch_kit) | 1-command Play Store Feature Graphic (1024×500), framed Screenshots (1080×1920) & Release Notes CLI. / প্লে স্টোর গ্রাফিক্স জেনারেটর। |
 | [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Firestore-backed admin API key pool with failover, cooldowns, health checks, and admin UI. / Firestore-ভিত্তিক API key pool, failover ও admin UI। |
 | [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR + AI bridge for scanner apps. / Scanner app-এর জন্য reusable OCR + AI bridge। |
 
