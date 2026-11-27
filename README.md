@@ -183,7 +183,7 @@ Shared drop-in Dart packages built for apps using `flutter-builder` — add via 
 | [`smart_notify_kit`](https://github.com/Keshab1997/smart_notify_kit) | Local reminders, daily streak nudges & deadline alerts with Quiet Hours & EN/বাংলা UI. / দৈনিক রিমাইন্ডার ও ডেডলাইন অ্যালার্ট। |
 | [`smart_share_card`](https://github.com/Keshab1997/smart_share_card) | Zero-dependency branded PNG share cards (Score, Job Alert, Summary, Streak) for WhatsApp/Status. / হোয়াটসঅ্যাপ শেয়ার কার্ড। |
 | [`smart_onboarding_kit`](https://github.com/Keshab1997/smart_onboarding_kit) | 1st-launch EN/বাংলা onboarding walkthrough + version-aware "What's New" sheet. / অনবোর্ডিং ও হোয়াটস নিউ শিট। |
-| [`store_launch_kit`](https://github.com/Keshab1997/store_launch_kit) | 1-command Play Store Feature Graphic (1024×500), framed Screenshots (1080×1920) & Release Notes CLI. / প্লে স্টোর গ্রাফিক্স জেনারেটর। |
+| [`store_launch_kit`](https://github.com/Keshab1997/store_launch_kit) | AI-first Play Store graphics & promo poster pipeline (`extract_app_brief.py` + `AGENT_DESIGN_PLAYBOOK.md` + `finalize` to exact `1024×500` / `1080×1920`). / AI দিয়ে প্রফেশনাল প্লে স্টোর পোস্টার ও স্ক্রিনশট জেনারেটর। |
 | [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Firestore-backed admin API key pool with failover, cooldowns, health checks, and admin UI. / Firestore-ভিত্তিক API key pool, failover ও admin UI। |
 | [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR + AI bridge for scanner apps. / Scanner app-এর জন্য reusable OCR + AI bridge। |
 
