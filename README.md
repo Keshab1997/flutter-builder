@@ -176,6 +176,7 @@ Shared drop-in Dart packages built for apps using `flutter-builder` — add via 
 | [`flutter-app-starter`](https://github.com/Keshab1997/flutter-app-starter) | 1-click GitHub Template repo pre-wired with `flutter-builder`, Agent Pack, `app_pulse_kit`, signing, Settings & brand icon generator. / নতুন app বানানোর ১-ক্লিক template। |
 | [`app_pulse_kit`](https://github.com/Keshab1997/app_pulse_kit) | Zero-cost remote soft/force updates, maintenance screen, scheduled notices, and feature flags (EN + বাংলা UI). / বিনা খরচে remote update, maintenance screen, notice banner ও feature flag। |
 | [`smart_review_feedback`](https://github.com/Keshab1997/smart_review_feedback) | Smart rating gate (4–5★ → Play Store In-App Review, 1–3★ → in-app feedback + diagnostics, EN + বাংলা UI). / স্মার্ট রেটিং গেট ও ফিডব্যাক কালেক্টর। |
+| [`bangla_kit`](https://github.com/Keshab1997/bangla_kit) | Zero-dependency Indian currency (`₹`/`৳`), Bangla digits, number-to-words, Bangla dates & deadline chips. / ভারতীয় মুদ্রা, বাংলা সংখ্যা, তারিখ ও ডেডলাইন টুলকিট। |
 | [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Firestore-backed admin API key pool with failover, cooldowns, health checks, and admin UI. / Firestore-ভিত্তিক API key pool, failover ও admin UI। |
 | [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR + AI bridge for scanner apps. / Scanner app-এর জন্য reusable OCR + AI bridge। |
 
