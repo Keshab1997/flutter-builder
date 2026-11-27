@@ -244,6 +244,32 @@ class InstallerTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, captain)
 
+    def test_installed_playbook_lists_companion_flutter_kits(self) -> None:
+        self.flutter_app()
+        self.assert_success(self.run_installer())
+        agents = self.agents_md()
+        for kit in (
+            "app_pulse_kit",
+            "smart_review_feedback",
+            "bangla_kit",
+            "local_vault_backup",
+            "smart_ad_kit",
+            "smart_notify_kit",
+            "smart_share_card",
+            "smart_onboarding_kit",
+            "smart_crash_diagnostics_kit",
+            "smart_app_lock_kit",
+            "smart_pdf_export_kit",
+            "smart_streaks_gamify_kit",
+            "smart_paywall_pro_kit",
+            "smart_voice_speech_kit",
+            "admin_api_key_manager",
+            "smart_ocr_ai_bridge",
+            "flutter-app-starter",
+        ):
+            with self.subTest(kit=kit):
+                self.assertIn(f"Keshab1997/{kit}", agents)
+
     def test_rerun_is_idempotent_and_changes_nothing(self) -> None:
         self.flutter_app()
         self.assert_success(self.run_installer())
