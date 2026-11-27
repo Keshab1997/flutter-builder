@@ -164,6 +164,26 @@ curl -fsSL https://raw.githubusercontent.com/Keshab1997/flutter-builder/v1.18.9/
 | `tool/screenshots/` | The harness: `shot_framework.dart` + `shot_runner_test.dart` (pack) and **your** `shot_registry.dart`. / Harness: framework ও runner pack-এর, `shot_registry.dart` আপনার। |
 | `scripts/doctor.sh` | Check app/release configuration. / App ও release configuration যাচাই করে। |
 | `scripts/check_toolchain.py` | Keep the Flutter pin and AGP/Gradle/Kotlin in step. / Flutter pin আর AGP/Gradle/Kotlin মিলিয়ে রাখে। |
+| `scripts/sync-pulse-config.py` | Keep `pulse.json` (`app_pulse_kit`) version/build in sync with `pubspec.yaml`. / `pulse.json`-এর version/build `pubspec.yaml`-এর সাথে মিলিয়ে রাখে। |
+
+## Companion Flutter packages / সহায়ক Flutter package
+
+Shared drop-in Dart packages built for apps using `flutter-builder` — add via `pubspec.yaml` instead of rewriting per app.<br>
+`flutter-builder` ব্যবহার করা app-গুলোর জন্য shared Dart package — প্রতি app-এ নতুন করে না লিখে `pubspec.yaml`-এ যোগ করুন।
+
+| Package | Purpose / কাজ |
+|---|---|
+| [`app_pulse_kit`](https://github.com/Keshab1997/app_pulse_kit) | Zero-cost remote soft/force updates, maintenance screen, scheduled notices, and feature flags (EN + বাংলা UI). / বিনা খরচে remote update, maintenance screen, notice banner ও feature flag। |
+| [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Firestore-backed admin API key pool with failover, cooldowns, health checks, and admin UI. / Firestore-ভিত্তিক API key pool, failover ও admin UI। |
+| [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR + AI bridge for scanner apps. / Scanner app-এর জন্য reusable OCR + AI bridge। |
+
+When an app uses `app_pulse_kit` with a root `pulse.json`, keep its `latestVersion` and `latestBuildNumber` aligned with `pubspec.yaml` before releasing:
+
+```bash
+python3 scripts/sync-pulse-config.py --root ../my-app --init   # create starter pulse.json
+python3 scripts/sync-pulse-config.py --root ../my-app          # sync from pubspec.yaml
+python3 scripts/sync-pulse-config.py --root ../my-app --check  # verify in CI / preflight
+```
 
 **With Captain Fast Lane:** attach the app repo in Arena for app work, or
 attach `Keshab1997/flutter-builder` for changes to this repository. Briefs live

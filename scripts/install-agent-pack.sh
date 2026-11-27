@@ -2184,6 +2184,18 @@ rejects a request that still carries the `Authorization` header
 - **Match the check to the change** — the cost table near the top of this file
   is the map. Cheap checks run every time; CI runs once, at the end.
 
+## Companion Flutter packages — reuse, don't rebuild
+
+Before writing boilerplate for cross-app features from scratch, check these
+shared `Keshab1997` Dart packages (all install cleanly via `pubspec.yaml` `git:`
+dependencies):
+
+| Need | Package | Notes |
+|---|---|---|
+| Remote soft/force updates, maintenance screen, scheduled notices, feature flags | [`app_pulse_kit`](https://github.com/Keshab1997/app_pulse_kit) | Zero-cost `pulse.json` or Firestore (`CallbackPulseSource`), offline cache, built-in EN + বাংলা UI. Keep `pulse.json` aligned with `pubspec.yaml` via `scripts/sync-pulse-config.py` from `flutter-builder`. |
+| Firestore-backed admin API key pool (failover, cooldowns, health checks, admin UI) | [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Shared Gemini / OpenRouter key rotation & management. |
+| Shared OCR + AI extraction pipeline | [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR-to-AI bridge for scanner apps. |
+
 ## Ask the human before
 
 - running CI, when a batch is ready to be checked (they own the run button);
