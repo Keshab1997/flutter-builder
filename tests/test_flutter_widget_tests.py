@@ -95,7 +95,7 @@ class ExampleWorkflowTests(unittest.TestCase):
         self.assertNotIn("pull_request:", header)
         self.assertNotIn("push:", header)
         self.assertIn(
-            "uses: Keshab1997/flutter-builder/.github/workflows/flutter-widget-tests.yml@v1.18.9",
+            "uses: Keshab1997/flutter-builder/.github/workflows/flutter-widget-tests.yml@v1.19.0",
             self.text,
         )
 

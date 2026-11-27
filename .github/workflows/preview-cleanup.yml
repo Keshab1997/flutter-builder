@@ -18,10 +18,10 @@ name: Reusable Flutter Web Preview Cleanup
 #   jobs:
 #     preview:
 #       if: github.event_name != 'delete'
-#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.18.9
+#       uses: Keshab1997/flutter-builder/.github/workflows/web-preview.yml@v1.19.0
 #     cleanup:
 #       if: github.event_name == 'delete' && github.event.ref_type == 'branch'
-#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.18.9
+#       uses: Keshab1997/flutter-builder/.github/workflows/preview-cleanup.yml@v1.19.0
 #       permissions:
 #         contents: write
 #
@@ -307,7 +307,7 @@ jobs:
           repository: Keshab1997/flutter-builder
           # The hub script ships with the preview workflows, so all three stay
           # pinned to the same release tag.
-          ref: v1.18.9
+          ref: v1.19.0
           path: .flutter-builder
 
       - name: Refresh the preview hub index
