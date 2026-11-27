@@ -173,7 +173,7 @@ Shared drop-in Dart packages built for apps using `flutter-builder` — add via 
 
 | Package | Purpose / কাজ |
 |---|---|
-| [`flutter-app-starter`](https://github.com/Keshab1997/flutter-app-starter) | 1-click GitHub Template repo pre-wired with `flutter-builder`, Agent Pack, 7 zero-plugin core kits, signing, Settings, brand icon generator, and `app_preset` / `extra_kits` selector. / সব kit অপশনসহ নতুন app বানানোর ১-ক্লিক template। |
+| [`flutter-app-starter`](https://github.com/Keshab1997/flutter-app-starter) | 1-click GitHub Template repo pre-wired with `flutter-builder`, Agent Pack, 8 zero-plugin core kits, signing, Settings, brand icon generator, and `app_preset` / `extra_kits` selector for all 24 kits. / ২৪টি kit অপশনসহ নতুন app বানানোর ১-ক্লিক template। |
 | [`app_pulse_kit`](https://github.com/Keshab1997/app_pulse_kit) | Zero-cost remote soft/force updates, maintenance screen, scheduled notices, and feature flags (EN + বাংলা UI). / বিনা খরচে remote update, maintenance screen, notice banner ও feature flag। |
 | [`smart_review_feedback`](https://github.com/Keshab1997/smart_review_feedback) | Smart rating gate (4–5★ → Play Store In-App Review, 1–3★ → in-app feedback + diagnostics, EN + বাংলা UI). / স্মার্ট রেটিং গেট ও ফিডব্যাক কালেক্টর। |
 | [`bangla_kit`](https://github.com/Keshab1997/bangla_kit) | Zero-dependency Indian currency (`₹`/`৳`), Bangla digits, number-to-words, Bangla dates & deadline chips. / ভারতীয় মুদ্রা, বাংলা সংখ্যা, তারিখ ও ডেডলাইন টুলকিট। |
@@ -189,6 +189,14 @@ Shared drop-in Dart packages built for apps using `flutter-builder` — add via 
 | [`smart_streaks_gamify_kit`](https://github.com/Keshab1997/smart_streaks_gamify_kit) | Daily streaks, automatic freeze shields, XP leveling & 7-day strip with বাংলা digits. / ডেইলি স্ট্রিক, ফ্রিজ শিল্ড ও XP লেভেল কিট। |
 | [`smart_paywall_pro_kit`](https://github.com/Keshab1997/smart_paywall_pro_kit) | Pro paywall sheet, 24h rewarded ad-free pass & SHA-256 promo codes with pluggable billing (EN + বাংলা). / প্রো আপগ্রেড, ২৪ ঘণ্টা অ্যাড-ফ্রি পাস ও প্রোমো কোড কিট। |
 | [`smart_voice_speech_kit`](https://github.com/Keshab1997/smart_voice_speech_kit) | EN/বাংলা TTS & STT controller with script detection, danda (`।`) chunking & learner speed presets. / বাংলা ও ইংরেজি ভয়েস রিডার ও স্পিচ কিট। |
+| [`smart_legal_consent_kit`](https://github.com/Keshab1997/smart_legal_consent_kit) | Play Store Privacy/Terms viewer, domain disclaimers, mandatory AI output flag/report & 2-step Delete All Data. / প্লে-স্টোর পলিসি, AI রিপোর্ট ও সব ডেটা মোছার কিট। |
+| [`smart_ai_chat_kit`](https://github.com/Keshab1997/smart_ai_chat_kit) | Daily free AI quota limiter, rewarded-ad credit boost, SHA-256 prompt cache & EN/বাংলা chat UI. / ডেইলি AI কোটা লিমিটার, ক্যাশ ও চ্যাট কিট। |
+| [`smart_upi_qr_kit`](https://github.com/Keshab1997/smart_upi_qr_kit) | NPCI `upi://pay` vector QR payment card & GST/discount/bill-split calculator. / UPI পেমেন্ট QR কার্ড ও GST/হিসাব ক্যালকুলেটর। |
+| [`smart_charts_stats_kit`](https://github.com/Keshab1997/smart_charts_stats_kit) | Zero-dependency pure-Dart `CustomPainter` bar, donut, trend sparkline & progress ring charts with বাংলা digits. / হালকা বাংলা-সাপোর্টেড গ্রাফ ও চার্ট কিট। |
+| [`smart_quiz_flashcard_kit`](https://github.com/Keshab1997/smart_quiz_flashcard_kit) | Timed MCQ exam engine with negative marking, mistake bank & SM-2 flashcards. / নেগেটিভ মার্কিং MCQ পরীক্ষা ও ফ্ল্যাশকার্ড কিট। |
+| [`smart_image_prep_kit`](https://github.com/Keshab1997/smart_image_prep_kit) | Pure-Dart image resizer, B&W high-contrast scan filter & AI token-saver Base64 compressor. / ইমেজ রিসাইজ, ডকুমেন্ট ফিল্টার ও AI টোকেন সেভার কিট। |
+| [`smart_csv_whatsapp_kit`](https://github.com/Keshab1997/smart_csv_whatsapp_kit) | Excel Bangla-safe UTF-8 BOM CSV import/export & WhatsApp due-reminder/khata message builder. / বাংলা Excel CSV ও WhatsApp তাগাদা মেসেজ কিট। |
+| [`smart_game_hud_kit`](https://github.com/Keshab1997/smart_game_hud_kit) | Casual Flutter game HUD, high-score/coin wallet, pause/game-over & rewarded-ad revive. / গেমের স্কোর, কয়েন ও রিভাইভ কিট। |
 | [`store_launch_kit`](https://github.com/Keshab1997/store_launch_kit) | AI-first Play Store graphics & promo poster pipeline (`extract_app_brief.py` + `AGENT_DESIGN_PLAYBOOK.md` + `finalize` to exact `1024×500` / `1080×1920`). / AI দিয়ে প্রফেশনাল প্লে স্টোর পোস্টার ও স্ক্রিনশট জেনারেটর। |
 | [`admin_api_key_manager`](https://github.com/Keshab1997/admin_api_key_manager) | Firestore-backed admin API key pool with failover, cooldowns, health checks, and admin UI. / Firestore-ভিত্তিক API key pool, failover ও admin UI। |
 | [`smart_ocr_ai_bridge`](https://github.com/Keshab1997/smart_ocr_ai_bridge) | Reusable OCR + AI bridge for scanner apps. / Scanner app-এর জন্য reusable OCR + AI bridge। |
