@@ -279,6 +279,7 @@ class InstallerTests(unittest.TestCase):
             "smart_search_filter_kit",
             "smart_permission_kit",
             "smart_help_faq_kit",
+            "smart_app_updater_kit",
             "admin_api_key_manager",
             "smart_ocr_ai_bridge",
             "flutter-app-starter",
